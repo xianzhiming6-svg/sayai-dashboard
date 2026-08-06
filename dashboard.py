@@ -9,7 +9,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
 DB = os.path.join(os.path.dirname(__file__), "usage.db")
-DS_KEY = os.environ.get("DEEPSEEK_API_KEY", "") or "sk-fde...8eba"
+DS_KEY = os.environ.get("DEEPSEEK_API_KEY", "") or "sk-fdea1f0336b4460581c19ad5f9b88eba"
 DS_URL = "https://api.deepseek.com/v1/chat/completions"
 
 def init_db():
