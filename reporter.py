@@ -7,7 +7,7 @@
 import json, urllib.request, time, threading
 
 # ---- 后端地址（部署后改为你的真实地址）----
-BACKEND_URL = "https://sayai-xxxx.onrender.com"  # 部署后替换
+BACKEND_URL = "https://sayai-dashboard.onrender.com"  # 部署后替换
 
 def report_usage(install_id, tokens):
     """上报一次翻译用量"""
