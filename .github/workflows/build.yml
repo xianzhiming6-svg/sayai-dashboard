@@ -1,0 +1,43 @@
+name: Build App
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pywebview pyinstaller faster-whisper
+      - run: |
+          pyinstaller --onedir --windowed --name "说AI懂的话" \
+            --add-data "license.py:." --add-data "reporter.py:." \
+            --exclude-module pytest --exclude-module _pytest \
+            PromptBridge.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 说AI懂的话-Mac
+          path: dist/说AI懂的话.app
+
+  build-win:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pywebview pyinstaller faster-whisper
+      - run: |
+          pyinstaller --onedir --windowed --name "说AI懂的话" `
+            --add-data "license.py;." --add-data "reporter.py;." `
+            --exclude-module pytest --exclude-module _pytest `
+            PromptBridge.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 说AI懂的话-Windows
+          path: dist/说AI懂的话
