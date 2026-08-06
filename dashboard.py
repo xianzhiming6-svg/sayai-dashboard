@@ -4,11 +4,13 @@
 说AI懂的话 - 监控仪表盘后端
 一个文件：接收用量上报 + 返回Q版仪表盘HTML
 """
-import sqlite3, json, time, os
+import sqlite3, json, time, os, urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
 DB = os.path.join(os.path.dirname(__file__), "usage.db")
+DS_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+DS_URL = "https://api.deepseek.com/v1/chat/completions"
 
 def init_db():
     with sqlite3.connect(DB) as c:
@@ -30,8 +32,30 @@ class Handler(BaseHTTPRequestHandler):
                     (data.get("install_id",""), data.get("tokens",0), data.get("cost_yuan",0)))
             self.send_response(200); self.end_headers()
             self.wfile.write(b"ok")
+        elif self.path == "/translate":
+            length = int(self.headers.get("Content-Length", 0))
+            data = json.loads(self.rfile.read(length))
+            result = self._call_deepseek(data.get("messages", []), data.get("model", "deepseek-v4-flash"))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
         else:
             self.send_response(404); self.end_headers()
+
+    def _call_deepseek(self, messages, model):
+        if not DS_KEY: return {"error": "未配置 DEEPSEEK_API_KEY"}
+        try:
+            data = json.dumps({"model": model, "messages": messages,
+                "max_tokens": 900, "temperature": 0.3}).encode()
+            req = urllib.request.Request(DS_URL, data=data,
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {DS_KEY}"})
+            resp = json.loads(urllib.request.urlopen(req, timeout=30).read())
+            tokens = resp.get("usage", {}).get("total_tokens", 0)
+            content = resp["choices"][0]["message"]["content"]
+            return {"tokens": tokens, "content": content}
+        except Exception as e:
+            return {"error": str(e)}
 
     def do_GET(self):
         if self.path == "/api/stats":
