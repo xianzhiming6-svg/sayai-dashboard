@@ -38,6 +38,7 @@ class Handler(BaseHTTPRequestHandler):
             result = self._call_deepseek(data.get("messages", []), data.get("model", "deepseek-v4-flash"))
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
         else:
@@ -58,7 +59,12 @@ class Handler(BaseHTTPRequestHandler):
             return {"error": str(e)}
 
     def do_GET(self):
-        if self.path == "/api/stats":
+        if self.path == "/app" or self.path == "/app/":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(APP_HTML.encode())
+        elif self.path == "/api/stats":
             with sqlite3.connect(DB) as c:
                 c.row_factory = sqlite3.Row
                 users = c.execute('''SELECT install_id, SUM(tokens) as t, SUM(cost_yuan) as c,
@@ -85,6 +91,99 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(html.encode())
         else:
             self.send_response(404); self.end_headers()
+
+APP_HTML = r'''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>🐣 说AI懂的话</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Noto Sans SC',sans-serif;background:linear-gradient(135deg,#fce4ec 0%,#e8f5e9 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+  .box{background:#fff;border-radius:24px;padding:32px 28px;max-width:480px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.08)}
+  .box h1{font-size:1.4em;color:#e91e63;text-align:center;margin-bottom:4px}
+  .box .sub{text-align:center;color:#bbb;font-size:.8em;margin-bottom:20px}
+  .mode-row{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+  .mode-row select{flex:1;padding:8px 12px;border:2px solid #f0f0f0;border-radius:12px;font-size:.9em;background:#fafafa;cursor:pointer}
+  .mode-row button{background:#e91e63;color:#fff;border:none;padding:8px 16px;border-radius:12px;cursor:pointer;font-size:.85em;white-space:nowrap}
+  textarea{width:100%;padding:14px;border:2px solid #f0f0f0;border-radius:16px;font-size:.95em;resize:vertical;min-height:90px;font-family:inherit;outline:none;transition:border .2s}
+  textarea:focus{border-color:#f48fb1}
+  .small{min-height:50px;font-size:.85em}
+  .actions{display:flex;gap:10px;margin:16px 0}
+  .btn{flex:1;padding:12px;border:none;border-radius:14px;font-size:1em;cursor:pointer;font-weight:700;transition:transform .15s}
+  .btn:active{transform:scale(.96)}
+  .btn-primary{background:#e91e63;color:#fff}
+  .btn-secondary{background:#f5f5f5;color:#666}
+  .output-box{background:#fafafa;border-radius:16px;padding:16px;min-height:60px;color:#666;font-size:.9em;white-space:pre-wrap;word-break:break-word}
+  .output-box .label{font-size:.75em;color:#bbb;margin-bottom:6px}
+  .error{color:#e91e63;background:#fff0f3;padding:12px;border-radius:12px;margin-top:12px}
+  .voice-btn{position:relative;float:right;background:none;border:1px solid #e0e0e0;border-radius:50%;width:36px;height:36px;cursor:pointer;font-size:1.2em;margin-top:-44px;margin-right:8px;transition:all .2s}
+  .voice-btn.recording{background:#e91e63;color:#fff;border-color:#e91e63;animation:pulse 1s infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(233,30,99,.4)}50%{box-shadow:0 0 0 10px rgba(233,30,99,0)}}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>🐣 说AI懂的话</h1>
+  <div class="sub">白话 → AI能直接执行的精准指令</div>
+  <div class="mode-row">
+    <select id="mode"><option value="single">单次（翻译完即丢）</option><option value="project">长项目（记住上下文）</option></select>
+    <button id="newProject" style="display:none" onclick="newProject()">+新建项目</button>
+  </div>
+  <div style="position:relative">
+    <textarea id="input" placeholder="在这里输入你平时说的话…"></textarea>
+    <button class="voice-btn" id="voiceBtn" title="语音输入">🎤</button>
+  </div>
+  <textarea id="extra" class="small" placeholder="补充说明（翻译不够精确时加一句，可留空）"></textarea>
+  <div class="actions">
+    <button class="btn btn-primary" onclick="doTranslate()">翻译 →</button>
+    <button class="btn btn-secondary" onclick="doCopy()">复制指令</button>
+  </div>
+  <div class="output-box" id="output"><div class="label">精准指令（复制后粘贴到任何 AI）</div>翻译结果会显示在这里。</div>
+  <div id="status"></div>
+</div>
+<script>
+let project='default', resultText='';
+document.getElementById('mode').onchange=function(){
+  document.getElementById('newProject').style.display=this.value==='project'?'inline-block':'none';
+};
+function newProject(){
+  var n=prompt('项目名称（如"论文""课程设计"）：');
+  if(n) project=n;
+}
+async function doTranslate(){
+  var txt=document.getElementById('input').value.trim();
+  if(!txt) return;
+  var status=document.getElementById('status');
+  status.innerHTML='<div style="text-align:center;color:#bbb;padding:12px">⏳ 翻译中...</div>';
+  try{
+    var messages=[{role:'user',content:txt}];
+    var extra=document.getElementById('extra').value.trim();
+    if(extra) messages.push({role:'user',content:'补充：'+extra});
+    var r=await fetch('/translate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:messages})});
+    var d=await r.json();
+    if(d.error){status.innerHTML='<div class="error">❌ '+d.error+'</div>';return}
+    resultText=d.content||'';
+    document.getElementById('output').innerHTML='<div class="label">精准指令（复制后粘贴到任何 AI）</div>'+resultText.replace(/</g,'&lt;');
+    status.innerHTML='';
+  }catch(e){status.innerHTML='<div class="error">网络错误，请重试</div>'}
+}
+async function doCopy(){
+  if(!resultText){alert('请先翻译');return}
+  try{await navigator.clipboard.writeText(resultText);var s=document.getElementById('status');s.innerHTML='<div style="text-align:center;color:#4caf50;padding:8px">✅ 已复制！</div>';setTimeout(function(){s.innerHTML=''},2000)}catch(e){alert('复制失败')}
+}
+// Voice
+var voiceBtn=document.getElementById('voiceBtn'),recognition=null,listening=false;
+voiceBtn.onclick=function(){
+  if(!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)){alert('浏览器不支持语音');return}
+  var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!recognition){recognition=new SR();recognition.lang='zh-CN';recognition.interimResults=false;recognition.onresult=function(e){document.getElementById('input').value=e.results[0][0].transcript};recognition.onend=function(){voiceBtn.classList.remove('recording');listening=false}}
+  if(listening){recognition.stop()}else{recognition.start();voiceBtn.classList.add('recording');listening=true}
+};
+</script>
+</body>
+</html>'''
 
 DASHBOARD_HTML = r'''<!DOCTYPE html>
 <html lang="zh-CN">
