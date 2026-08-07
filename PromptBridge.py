@@ -358,7 +358,7 @@ document.getElementById("btnVoice").onclick=async function(){
     try{await window.pywebview.api.start_voice()}catch(e){st.textContent="录音启动失败: "+e;b.dataset.recording="0"}
   }
 };
-}</script></body></html>"""
+</script></body></html>"""
 
 
 # ==== 激活函数 (JS) ====
