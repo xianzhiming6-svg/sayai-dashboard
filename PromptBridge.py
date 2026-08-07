@@ -4,7 +4,7 @@
 PromptBridge 桌面面板 v1.1
 - 翻译、弹选项、补充、单一/多模式、🎤录音转文字
 """
-import webview, json, urllib.request, os, re, subprocess, platform, threading
+import webview, json, urllib.request, os, re, subprocess, platform, threading, socket, shutil
 from license import check_and_count as _check_license, get_install_id as _install_id, activate as _activate
 from reporter import report_usage as _report
 
@@ -12,10 +12,44 @@ MODEL = "deepseek-v4-flash"
 # 安全代理：翻译请求发到 Render 服务器，API Key 只在服务端
 API_URL = "https://sayai-dashboard.onrender.com/translate"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-MEMORY_DIR = os.path.join(os.path.expanduser("~/Documents/说AI懂的话/记忆本"))
+MEMORY_DIR = os.path.join(os.path.expanduser("~/Library/Application Support/说AI懂的话/记忆本"))
+OLD_MEMORY_DIR = os.path.join(os.path.expanduser("~/Documents/说AI懂的话/记忆本"))
 os.makedirs(MEMORY_DIR, exist_ok=True)
+# 首次启动时把旧位置（文稿/说AI懂的话/记忆本）里的项目迁移过来
+try:
+    if not os.listdir(MEMORY_DIR) and os.path.isdir(OLD_MEMORY_DIR):
+        for f in os.listdir(OLD_MEMORY_DIR):
+            if f.endswith(".json"):
+                try: shutil.copy2(os.path.join(OLD_MEMORY_DIR, f), os.path.join(MEMORY_DIR, f))
+                except Exception: pass
+except Exception:
+    pass
 IS_MAC = platform.system() == "Darwin"
 IS_WIN = platform.system() == "Windows"
+
+try:
+    from opencc import OpenCC as _OpenCC
+    _cc = _OpenCC("t2s")
+    def to_simplified(text):
+        try: return _cc.convert(text)
+        except Exception: return text
+except Exception:
+    def to_simplified(text): return text
+
+_lock_socket = None
+
+def _acquire_single_instance():
+    """同一时间只允许一个窗口：第二个启动的实例直接退出"""
+    global _lock_socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", 47837))
+        s.listen(1)
+    except OSError:
+        s.close()
+        return False
+    _lock_socket = s
+    return True
 
 INTENT_SYS = """你是"白话精炼器"。用户用日常口语说出需求（可能有语音转文字带来的错别字），你把这段话重写成一条能直接喂给 AI 执行的精准指令。
 
@@ -128,6 +162,16 @@ class Api:
                 {"role": "system", "content": INTENT_SYS},
                 {"role": "user", "content": f"用户的话：{combined}{mem_hint}"}])
             body, uncertain, options = parse_uncertain(instruction)
+            body = to_simplified(body)
+            if uncertain: uncertain = to_simplified(uncertain)
+            options = [to_simplified(o) for o in options]
+            if mode == "project":
+                try:
+                    mem = self.current_memory
+                    mem.setdefault("最近使用", []).insert(0, (combined or original)[:60])
+                    mem["最近使用"] = mem["最近使用"][:20]
+                    save_memory(project_name, mem)
+                except Exception: pass
             # 后台静默上报用量
             try:
                 threading.Thread(target=_report,
@@ -172,6 +216,29 @@ class Api:
         if os.path.exists(p): return False
         save_memory(name, {"指代": {}, "纠错": {}, "最近使用": []}); return True
 
+    def delete_project(self, name):
+        """删除项目：连同它的记忆文件一起删除"""
+        try:
+            if not name or name == "默认项目": return False
+            p = os.path.join(MEMORY_DIR, f"{name}.json")
+            if os.path.exists(p): os.remove(p)
+            if self.current_project == name:
+                self.current_project = "默认项目"
+                self.current_memory = load_memory("默认项目")
+            return True
+        except Exception:
+            return False
+
+    def save_reference(self, project_name, word, choice):
+        """长项目模式：记住'某个词/指代'对应什么，下次自动替换"""
+        try:
+            mem = load_memory(project_name) if project_name != self.current_project else self.current_memory
+            mem.setdefault("指代", {})[word.strip()] = choice.strip()
+            save_memory(project_name, mem)
+            return True
+        except Exception:
+            return False
+
     def start_voice(self):
         """点击麦克风：开始或停止录音"""
         if self._recording: return self._stop_and_recognize()
@@ -204,17 +271,26 @@ class Api:
             self._rec_stream.stop(); self._rec_stream.close(); self._recording = False
             if not self._audio_chunks: return {"ok": False, "error": "没有录到声音"}
             audio = np.concatenate(self._audio_chunks)
+            peak = float(np.abs(audio).max())
+            if peak < 800:
+                return {"ok": False, "error": "没有检测到声音：请检查麦克风是否插好，并确认系统设置→声音→输入里选对了设备"}
             tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
             with wave.open(tmp.name, 'wb') as wf:
                 wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(self._rec_fs)
                 wf.writeframes(audio.tobytes())
             # faster-whisper 本地识别（base 模型，中文优化）
             from faster_whisper import WhisperModel
-            model = WhisperModel("base", device="cpu", compute_type="int8")
-            segments, _ = model.transcribe(tmp.name, language="zh", beam_size=5)
+            model_dir = os.path.join(APP_DIR, "whisper-base")
+            if os.path.isdir(model_dir):
+                model = WhisperModel(model_dir, device="cpu", compute_type="int8", local_files_only=True)
+            else:
+                model = WhisperModel("base", device="cpu", compute_type="int8")
+            segments, _ = model.transcribe(tmp.name, language="zh", beam_size=5,
+                vad_filter=True, initial_prompt="以下是普通话的简体中文语音转写。")
             text = "".join(seg.text for seg in segments)
+            text = to_simplified(text)
             os.unlink(tmp.name)
-            if not text.strip(): return {"ok": False, "error": "未识别到语音"}
+            if not text.strip(): return {"ok": False, "error": "未识别到语音，请靠近麦克风再说一次"}
             return {"ok": True, "text": text}
         except Exception as e: return {"ok": False, "error": str(e)}
         finally: _sys.path[:] = _saved
@@ -228,7 +304,9 @@ HTML = r"""<!DOCTYPE html>
 body{background:#1e1e1e;color:#e8e8e8;height:100vh;display:flex;flex-direction:column}
 .header{background:#252526;padding:10px 14px;display:flex;justify-content:space-between;align-items:center}
 .header .title{font-size:14px;font-weight:700}.header .sub{font-size:10px;color:#9d9d9d}
-.mode-bar{background:#2d2d30;padding:6px 14px;display:flex;gap:10px;align-items:center;font-size:11px;color:#9d9d9d}
+.mode-bar{background:#2d2d30;padding:6px 14px;display:flex;gap:10px;align-items:flex-end;font-size:11px;color:#9d9d9d}
+.mode-field{display:flex;flex-direction:column;gap:3px}
+.mode-field label{font-size:11px;color:#9d9d9d}
 .mode-bar select{background:#3a3a3c;color:#e8e8e8;border:1px solid #555;border-radius:4px;padding:3px 6px;font-size:11px}
 .mode-bar button{background:#3a3a3c;color:#e8e8e8;border:1px solid #555;border-radius:4px;padding:3px 8px;font-size:10px;cursor:pointer}
 .content{flex:1;display:flex;flex-direction:column;padding:10px 14px;overflow-y:auto}
@@ -259,10 +337,13 @@ button{padding:6px 16px;border:none;border-radius:6px;font-size:12px;font-weight
 </style></head><body>
 <div class="header"><span class="title">说AI懂的话</span><span class="sub">白话 → AI能懂的话</span></div>
 <div class="mode-bar">
-  <span>🔄 模式：</span>
-  <select id="modeSelect"><option value="single">单次（翻译完即丢）</option><option value="project">长项目（本地记忆）</option></select>
+  <div class="mode-field">
+    <label for="modeSelect">模式</label>
+    <select id="modeSelect"><option value="single">单次（翻译完即丢）</option><option value="project">长项目（本地记忆）</option></select>
+  </div>
   <select id="projectSelect"></select>
   <button id="btnNewProject">+新建项目</button>
+  <button id="btnDelProject">删除项目</button>
 </div>
 <div class="content">
   <label for="inputBox">你的白话：</label>
@@ -286,27 +367,56 @@ button{padding:6px 16px;border:none;border-radius:6px;font-size:12px;font-weight
 <script>
 var lastBody="",lastOriginal="",lastSupplement="";
 async function loadProjects(){
-  var projects=await window.pywebview.api.get_projects();
   var sel=document.getElementById("projectSelect");sel.innerHTML="";
-  projects.forEach(function(p){var o=document.createElement("option");o.value=p;o.textContent=p;sel.appendChild(o)})
+  try{
+    var projects=await window.pywebview.api.get_projects();
+    projects.forEach(function(p){var o=document.createElement("option");o.value=p;o.textContent=p;sel.appendChild(o)})
+  }catch(e){
+    var o=document.createElement("option");o.value="默认项目";o.textContent="默认项目";sel.appendChild(o);
+    document.getElementById("status").textContent="项目列表读取失败:"+e
+  }
 }
-loadProjects();
+function waitBridge(fn){
+  var n=0;
+  var t=setInterval(function(){
+    n++;
+    if((window.pywebview&&window.pywebview.api)||n>15){clearInterval(t);fn()}
+  },300);
+}
+waitBridge(loadProjects);
 document.getElementById("modeSelect").onchange=function(){
   var is=this.value==="project";
   document.getElementById("projectSelect").style.display=is?"inline":"none";
-  document.getElementById("btnNewProject").style.display=is?"inline":"none"
+  document.getElementById("btnNewProject").style.display=is?"inline":"none";
+  document.getElementById("btnDelProject").style.display=is?"inline":"none"
 };
 document.getElementById("modeSelect").onchange();
 document.getElementById("btnNewProject").onclick=async function(){
   var n=prompt("项目名称：");if(!n)return;
   try{var ok=await window.pywebview.api.create_project(n);if(ok){loadProjects();document.getElementById("projectSelect").value=n}else alert("项目已存在")}catch(e){alert("失败:"+e)}
 };
+document.getElementById("btnDelProject").onclick=async function(){
+  var p=document.getElementById("projectSelect").value||"";
+  if(!p||p==="默认项目"){alert("没有可删除的项目");return}
+  if(!confirm("确定删除项目「"+p+"」吗？会同时删除它的记忆文件"))return;
+  try{
+    var ok=await window.pywebview.api.delete_project(p);
+    if(ok){alert("已删除");loadProjects();document.getElementById("projectSelect").value="默认项目"}
+    else alert("删除失败")
+  }catch(e){alert("失败:"+e)}
+};
 function showUncertain(u,opts){
   var b=document.getElementById("uncertainBox");
   if(u){b.style.display="block";document.getElementById("uncertainQ").textContent=u;
     var d=document.getElementById("uncertainOpts");d.innerHTML="";
     if(opts&&opts.length)opts.forEach(function(o){var x=document.createElement("button");x.className="opt";x.textContent=o;
-      x.onclick=function(){lastSupplement=document.getElementById("supplementBox").value.trim()+"\n（我选："+o+"）";doTranslate()};
+      x.onclick=function(){
+        lastSupplement=document.getElementById("supplementBox").value.trim()+"\n（我选："+o+"）";
+        var uq=document.getElementById("uncertainQ").textContent||"";
+        var mm=uq.match(/【拿不准[：:](.+?)(是指|指的是)?[？?]】/);
+        if(mm&&mm[1]){try{window.pywebview.api.save_reference(document.getElementById("projectSelect").value||"默认项目",mm[1],o)}catch(e){}}
+        doTranslate()
+      };
       d.appendChild(x)})
   }else b.style.display="none"
 }
@@ -377,6 +487,8 @@ async function doActivate(){
 HTML = HTML.replace("</script>", ACTIVATE_JS + "\n</script>")
 
 def main():
+    if not _acquire_single_instance():
+        return
     webview.create_window("说AI懂的话", html=HTML, width=420, height=680,
                           min_size=(360,500), js_api=api, background_color="#1e1e1e")
     webview.start()
