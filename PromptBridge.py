@@ -60,6 +60,9 @@ INTENT_SYS = """你是"白话精炼器"。用户用日常口语说出需求（�
 4. 遇到歧义词或模糊指代，末尾标注【拿不准：XXX是指？】选项：A. ... B. ... C. ...
 
 输出格式：先给出指令内容，然后用一行"---"分隔，最后用【回译：】开头写通俗语言版本。
+如果用户的话里有歧义或关键信息缺失（比如"那个文件""这个东西""买苹果"分不清指什么），必须在上面的完整输出之后，单独再输出一行：
+【拿不准：XXX是指？】选项：A. ... B. ... C. ...
+（注意：这一行必须单独成行，不能写进精准指令正文；没有歧义就绝对不要输出）
 
 示例：
 请为夏季促销设计手机端海报方案：1.推荐3款零基础工具 2.促销海报尺寸 3.色彩搭配 4.文案结构 5.步骤
@@ -201,11 +204,36 @@ class Api:
     def copy_to_clipboard(self, text):
         try:
             if IS_MAC:
-                p = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
-                p.communicate(text.encode("utf-8"))
+                try:
+                    from AppKit import NSPasteboard, NSPasteboardTypeString
+                    pb = NSPasteboard.generalPasteboard()
+                    pb.clearContents()
+                    pb.setString_forType_(text, NSPasteboardTypeString)
+                    return True
+                except Exception:
+                    p = subprocess.run(["/usr/bin/pbcopy"], input=text.encode("utf-8"),
+                        capture_output=True, timeout=10)
+                    return p.returncode == 0
             elif IS_WIN:
-                p = subprocess.Popen("clip", stdin=subprocess.PIPE, shell=True)
-                p.communicate(text.encode("utf-8"))
+                import ctypes
+                CF_UNICODETEXT = 13
+                GMEM_MOVEABLE = 0x0002
+                user32 = ctypes.windll.user32
+                kernel32 = ctypes.windll.kernel32
+                if not user32.OpenClipboard(0):
+                    return False
+                try:
+                    user32.EmptyClipboard()
+                    data = text.encode("utf-16-le") + b"\x00\x00"
+                    h = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
+                    if h:
+                        p = kernel32.GlobalLock(h)
+                        ctypes.memmove(p, data, len(data))
+                        kernel32.GlobalUnlock(h)
+                        user32.SetClipboardData(CF_UNICODETEXT, h)
+                finally:
+                    user32.CloseClipboard()
+                return True
             return True
         except Exception: return False
 
@@ -452,7 +480,11 @@ async function doTranslate(){
 document.getElementById("btnTranslate").onclick=doTranslate;
 document.getElementById("btnCopy").onclick=async function(){
   if(!lastBody)return;
-  try{await window.pywebview.api.copy_to_clipboard(lastBody);document.getElementById("status").textContent="已复制，去粘贴"}catch(e){}
+  var st=document.getElementById("status");
+  try{
+    var ok=await window.pywebview.api.copy_to_clipboard(lastBody);
+    st.textContent=ok?"已复制，去粘贴":"复制失败，请再点一次";
+  }catch(e){st.textContent="复制失败："+e}
 };
 document.getElementById("supplementBox").addEventListener("input",function(){lastSupplement=""});
 document.getElementById("btnVoice").onclick=async function(){
