@@ -4,7 +4,7 @@
 PromptBridge 桌面面板 v1.1
 - 翻译、弹选项、补充、单一/多模式、🎤录音转文字
 """
-import webview, json, urllib.request, os, re, subprocess, platform, threading, socket, shutil
+import webview, json, urllib.request, os, re, subprocess, platform, threading, socket, shutil, sys
 from license import check_and_count as _check_license, get_install_id as _install_id, activate as _activate
 from reporter import report_usage as _report
 
@@ -240,18 +240,32 @@ class Api:
         except Exception: return False
 
     def check_update(self):
-        """启动时检查 GitHub 最新版本，有新版本时返回版本号和下载地址"""
+        """启动时检查更新：先查 GitHub Release，失败则查 Render 版本端点"""
+        # 优先查 GitHub Release
         try:
             req = urllib.request.Request(
                 f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
                 headers={"User-Agent": "sayai-check-update"})
-            r = json.loads(urllib.request.urlopen(req, timeout=6).read())
+            r = json.loads(urllib.request.urlopen(req, timeout=8).read())
             latest = (r.get("tag_name") or "").lstrip("v")
             if latest and latest != APP_VERSION:
                 assets = r.get("assets", [])
                 url = next((a.get("browser_download_url", "") for a in assets
                             if a.get("name", "").endswith(".zip")), "")
                 return {"ok": True, "latest": latest, "url": url or r.get("html_url", "")}
+            return {"ok": True, "latest": latest, "url": ""}
+        except Exception:
+            pass
+        # fallback：查 Render 服务器版本端点
+        try:
+            req = urllib.request.Request(f"{API_URL.rsplit('/',1)[0]}/version", headers={"User-Agent": "sayai"})
+            d = json.loads(urllib.request.urlopen(req, timeout=8).read())
+            latest = d.get("version", "")
+            mac = d.get("mac_url", "")
+            win = d.get("win_url", "")
+            url = mac if sys.platform == "darwin" else win
+            if latest and latest != APP_VERSION:
+                return {"ok": True, "latest": latest, "url": url}
             return {"ok": True, "latest": latest, "url": ""}
         except Exception:
             return {"ok": False, "latest": "", "url": ""}
@@ -553,27 +567,9 @@ async function doActivate(){
 # 注入 JS 到 HTML
 HTML = HTML.replace("</script>", ACTIVATE_JS + "\n</script>")
 
-APP_VERSION = "1.0.0"
-VERSION_URL = "https://sayai-dashboard.onrender.com/version"
-
-def _check_update():
-    """后台检查是否有新版本，有则弹窗提示"""
-    try:
-        req = urllib.request.Request(VERSION_URL)
-        data = json.loads(urllib.request.urlopen(req, timeout=10).read())
-        latest = data.get("version", "")
-        if latest and latest != APP_VERSION:
-            import tkinter.messagebox as mb
-            mb.showinfo("发现新版本",
-                f"当前版本: {APP_VERSION}\n最新版本: {latest}\n\n请联系作者获取最新版本。")
-    except Exception:
-        pass  # 网络不通时静默
-
 def main():
     if not _acquire_single_instance():
         return
-    # 后台检查更新
-    threading.Thread(target=_check_update, daemon=True).start()
     webview.create_window("说AI懂的话", html=HTML, width=420, height=680,
                           min_size=(360,500), js_api=api, background_color="#1e1e1e")
     webview.start()
