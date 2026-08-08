@@ -204,40 +204,27 @@ class Api:
         return self.translate(original, supplement.strip() + "\n（我选：" + option + "）", project_name, mode)
 
     def copy_to_clipboard(self, text):
+        """复制到系统剪贴板——优先 subprocess，pywebview 打包后更可靠"""
         try:
             if IS_MAC:
-                try:
-                    from AppKit import NSPasteboard, NSPasteboardTypeString
-                    pb = NSPasteboard.generalPasteboard()
-                    pb.clearContents()
-                    pb.setString_forType_(text, NSPasteboardTypeString)
+                p = subprocess.run(["/usr/bin/pbcopy"], input=text.encode("utf-8"),
+                    capture_output=True, timeout=10)
+                if p.returncode == 0:
                     return True
-                except Exception:
-                    p = subprocess.run(["/usr/bin/pbcopy"], input=text.encode("utf-8"),
-                        capture_output=True, timeout=10)
-                    return p.returncode == 0
-            elif IS_WIN:
-                import ctypes
-                CF_UNICODETEXT = 13
-                GMEM_MOVEABLE = 0x0002
-                user32 = ctypes.windll.user32
-                kernel32 = ctypes.windll.kernel32
-                if not user32.OpenClipboard(0):
-                    return False
-                try:
-                    user32.EmptyClipboard()
-                    data = text.encode("utf-16-le") + b"\x00\x00"
-                    h = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
-                    if h:
-                        p = kernel32.GlobalLock(h)
-                        ctypes.memmove(p, data, len(data))
-                        kernel32.GlobalUnlock(h)
-                        user32.SetClipboardData(CF_UNICODETEXT, h)
-                finally:
-                    user32.CloseClipboard()
+                # fallback: /usr/bin/osascript
+                import shlex
+                safe = text.replace('"', '\\"').replace('\n', '\\n')
+                subprocess.run(["osascript", "-e", f'set the clipboard to "{safe}"'],
+                    capture_output=True, timeout=10)
                 return True
+            elif IS_WIN:
+                cmd = "powershell -command \"Set-Clipboard -Value ([System.Net.WebUtility]::HtmlDecode('\" + [System.Net.WebUtility]::HtmlEncode('\"' + $input + '\"') + \"'))\""
+                p = subprocess.run(["clip"], input=text.encode("utf-8"),
+                    capture_output=True, timeout=10)
+                return p.returncode == 0
             return True
-        except Exception: return False
+        except Exception:
+            return False
 
     def check_update(self):
         """启动时检查更新：先查 GitHub Release，失败则查 Render 版本端点"""
