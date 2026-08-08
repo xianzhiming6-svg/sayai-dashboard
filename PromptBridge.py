@@ -9,6 +9,8 @@ from license import check_and_count as _check_license, get_install_id as _instal
 from reporter import report_usage as _report
 
 MODEL = "deepseek-v4-flash"
+APP_VERSION = "1.0.1"
+GITHUB_REPO = "xianzhiming6-svg/sayai-dashboard"
 # 安全代理：翻译请求发到 Render 服务器，API Key 只在服务端
 API_URL = "https://sayai-dashboard.onrender.com/translate"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -237,6 +239,31 @@ class Api:
             return True
         except Exception: return False
 
+    def check_update(self):
+        """启动时检查 GitHub 最新版本，有新版本时返回版本号和下载地址"""
+        try:
+            req = urllib.request.Request(
+                f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
+                headers={"User-Agent": "sayai-check-update"})
+            r = json.loads(urllib.request.urlopen(req, timeout=6).read())
+            latest = (r.get("tag_name") or "").lstrip("v")
+            if latest and latest != APP_VERSION:
+                assets = r.get("assets", [])
+                url = next((a.get("browser_download_url", "") for a in assets
+                            if a.get("name", "").endswith(".zip")), "")
+                return {"ok": True, "latest": latest, "url": url or r.get("html_url", "")}
+            return {"ok": True, "latest": latest, "url": ""}
+        except Exception:
+            return {"ok": False, "latest": "", "url": ""}
+
+    def open_update_url(self, url):
+        try:
+            import webbrowser
+            webbrowser.open(url)
+            return True
+        except Exception:
+            return False
+
     def get_projects(self): return list_projects()
 
     def create_project(self, name):
@@ -364,6 +391,7 @@ button{padding:6px 16px;border:none;border-radius:6px;font-size:12px;font-weight
 #resultBox{flex:1;background:#2d2d30;border:1px solid #3a3a3c;border-radius:6px;padding:10px;font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-y:auto;min-height:180px}
 </style></head><body>
 <div class="header"><span class="title">说AI懂的话</span><span class="sub">白话 → AI能懂的话</span></div>
+<div id="updateBar" style="display:none;background:#2d2d00;border-bottom:1px solid #555;padding:6px 14px;font-size:11px;color:#ffd60a">发现新版本 v<span id="updateVer"></span>，<a id="updateLink" style="color:#ffd60a;cursor:pointer;text-decoration:underline">点击下载更新</a></div>
 <div class="mode-bar">
   <div class="mode-field">
     <label for="modeSelect">模式</label>
@@ -394,6 +422,13 @@ button{padding:6px 16px;border:none;border-radius:6px;font-size:12px;font-weight
 </div>
 <script>
 var lastBody="",lastOriginal="",lastSupplement="";
+window.pywebview.api.check_update().then(function(r){
+  if(r&&r.ok&&r.latest&&r.url){
+    document.getElementById("updateVer").textContent=r.latest;
+    document.getElementById("updateLink").onclick=function(){window.pywebview.api.open_update_url(r.url)};
+    document.getElementById("updateBar").style.display="block"
+  }
+}).catch(function(){});
 async function loadProjects(){
   var sel=document.getElementById("projectSelect");sel.innerHTML="";
   try{
@@ -518,9 +553,27 @@ async function doActivate(){
 # 注入 JS 到 HTML
 HTML = HTML.replace("</script>", ACTIVATE_JS + "\n</script>")
 
+APP_VERSION = "1.0.0"
+VERSION_URL = "https://sayai-dashboard.onrender.com/version"
+
+def _check_update():
+    """后台检查是否有新版本，有则弹窗提示"""
+    try:
+        req = urllib.request.Request(VERSION_URL)
+        data = json.loads(urllib.request.urlopen(req, timeout=10).read())
+        latest = data.get("version", "")
+        if latest and latest != APP_VERSION:
+            import tkinter.messagebox as mb
+            mb.showinfo("发现新版本",
+                f"当前版本: {APP_VERSION}\n最新版本: {latest}\n\n请联系作者获取最新版本。")
+    except Exception:
+        pass  # 网络不通时静默
+
 def main():
     if not _acquire_single_instance():
         return
+    # 后台检查更新
+    threading.Thread(target=_check_update, daemon=True).start()
     webview.create_window("说AI懂的话", html=HTML, width=420, height=680,
                           min_size=(360,500), js_api=api, background_color="#1e1e1e")
     webview.start()

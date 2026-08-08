@@ -78,6 +78,16 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"users":[dict(r) for r in users],
                 "daily":[dict(r) for r in daily], "total_tokens":total_tokens, 
                 "total_cost":round(total_cost,4), "total_users":total_users, "today":today}, ensure_ascii=False).encode())
+        elif self.path == "/version":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "version": "1.0.0",
+                "mac_url": "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-mac.zip",
+                "win_url": "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-win.zip"
+            }).encode())
         elif self.path == "/" or self.path == "":
             html = DASHBOARD_HTML
             self.send_response(200)
