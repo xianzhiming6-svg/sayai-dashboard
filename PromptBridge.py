@@ -461,6 +461,26 @@ function waitBridge(fn){
   },300);
 }
 waitBridge(loadProjects);
+// 自定义弹窗（pywebview 的 WKWebView 禁了原生 prompt/alert/confirm）
+var _dialogCb=null,_dialogInput=null;
+function showDialog(title,msg,hasInput,cb){
+  var d=document.getElementById('_customDialog');
+  if(!d){
+    d=document.createElement('div');d.id='_customDialog';
+    d.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:9999';
+    d.innerHTML='<div style="background:#2d2d30;border-radius:8px;padding:16px;min-width:260px;max-width:340px"><div id="_dTitle" style="color:#e8e8e8;font-size:13px;font-weight:600;margin-bottom:8px"></div><div id="_dInputC" style="display:none;margin-bottom:8px"><input id="_dInput" style="width:100%;background:#3a3a3c;color:#e8e8e8;border:1px solid #555;border-radius:4px;padding:6px 10px;font-size:12px"/></div><div id="_dMsg" style="color:#9d9d9d;font-size:12px;margin-bottom:12px;line-height:1.5"></div><div style="display:flex;gap:8px;justify-content:flex-end"><button id="_dCancel" style="background:#3a3a3c;color:#e8e8e8;padding:5px 14px;border-radius:4px;font-size:11px;border:none;cursor:pointer">取消</button><button id="_dOk" style="background:#0a84ff;color:#fff;padding:5px 14px;border-radius:4px;font-size:11px;border:none;cursor:pointer">确定</button></div></div>';
+    document.body.appendChild(d);
+  }
+  document.getElementById('_dTitle').textContent=title;document.getElementById('_dMsg').textContent=msg||'';
+  var ic=document.getElementById('_dInputC'),ip=document.getElementById('_dInput');
+  if(hasInput){ic.style.display='block';ip.value='';ip.focus()}else ic.style.display='none';
+  d.style.display='flex';
+  document.getElementById('_dOk').onclick=function(){d.style.display='none';if(cb)cb(hasInput?ip.value.trim():true)};
+  document.getElementById('_dCancel').onclick=function(){d.style.display='none';if(cb)cb(hasInput?'':false)}
+}
+function _alert(m){showDialog('提示',m,false,null)}
+function _confirm(m,cb){showDialog('确认',m,false,cb)}
+function _prompt(m,cb){showDialog('输入',m,true,cb)}
 document.getElementById("modeSelect").onchange=function(){
   var is=this.value==="project";
   document.getElementById("projectSelect").style.display=is?"inline":"none";
@@ -468,19 +488,17 @@ document.getElementById("modeSelect").onchange=function(){
   document.getElementById("btnDelProject").style.display=is?"inline":"none"
 };
 document.getElementById("modeSelect").onchange();
-document.getElementById("btnNewProject").onclick=async function(){
-  var n=prompt("项目名称：");if(!n)return;
-  try{var ok=await window.pywebview.api.create_project(n);if(ok){loadProjects();document.getElementById("projectSelect").value=n}else alert("项目已存在")}catch(e){alert("失败:"+e)}
+document.getElementById("btnNewProject").onclick=function(){
+  _prompt("请输入项目名称：",function(n){if(!n)return;
+    window.pywebview.api.create_project(n).then(function(ok){if(ok){loadProjects();document.getElementById("projectSelect").value=n}else _alert("项目已存在")}).catch(function(e){_alert("失败:"+e)})
+  })
 };
-document.getElementById("btnDelProject").onclick=async function(){
+document.getElementById("btnDelProject").onclick=function(){
   var p=document.getElementById("projectSelect").value||"";
-  if(!p||p==="默认项目"){alert("没有可删除的项目");return}
-  if(!confirm("确定删除项目「"+p+"」吗？会同时删除它的记忆文件"))return;
-  try{
-    var ok=await window.pywebview.api.delete_project(p);
-    if(ok){alert("已删除");loadProjects();document.getElementById("projectSelect").value="默认项目"}
-    else alert("删除失败")
-  }catch(e){alert("失败:"+e)}
+  if(!p||p==="默认项目"){_alert("没有可删除的项目");return}
+  _confirm("确定删除项目「"+p+"」吗？会同时删除它的记忆文件",function(ok){if(!ok)return;
+    window.pywebview.api.delete_project(p).then(function(ok){if(ok){_alert("已删除");loadProjects();document.getElementById("projectSelect").value="默认项目"}else _alert("删除失败")}).catch(function(e){_alert("失败:"+e)})
+  })
 };
 function showUncertain(u,opts){
   var b=document.getElementById("uncertainBox");
