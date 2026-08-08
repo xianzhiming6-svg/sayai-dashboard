@@ -202,27 +202,34 @@ class Api:
         return self.translate(original, supplement.strip() + "\n（我选：" + option + "）", project_name, mode)
 
     def check_update(self):
-        """检查 GitHub Release 是否有新版本。返回 {ok, latest, url}"""
-        GITHUB = "xianzhiming6-svg/sayai-dashboard"
+        """检查最新版本：先查 Render 服务器，失败再查 GitHub Release"""
         try:
-            import urllib.request, json, re
+            import urllib.request, json
+            req = urllib.request.Request("https://sayai-dashboard.onrender.com/version",
+                headers={"User-Agent": "sayai"})
+            d = json.loads(urllib.request.urlopen(req, timeout=8).read())
+            version = d.get("version", "")
+            is_mac = platform.system() == "Darwin"
+            url = d.get("mac_url") if is_mac else d.get("win_url")
+            if version:
+                return {"ok": True, "latest": version, "url": url or ""}
+        except Exception:
+            pass
+        # fallback: 直连 GitHub
+        try:
             req = urllib.request.Request(
-                f"https://api.github.com/repos/{GITHUB}/releases/latest",
-                headers={"User-Agent": "sayai-check-update"})
-            r = json.loads(urllib.request.urlopen(req, timeout=10).read())
+                "https://api.github.com/repos/xianzhiming6-svg/sayai-dashboard/releases/latest",
+                headers={"User-Agent": "sayai"})
+            r = json.loads(urllib.request.urlopen(req, timeout=8).read())
             latest = (r.get("tag_name") or "").lstrip("v")
-            if not latest:
-                return {"ok": False, "latest": "", "url": ""}
-            # 从 assets 里找符合当前系统的下载链接
+            if not latest: return {"ok": False, "latest": "", "url": ""}
             is_mac = platform.system() == "Darwin"
             assets = r.get("assets", [])
             url = ""
             for a in assets:
                 name = a.get("name", "").lower()
-                if is_mac and ("mac" in name or ".app" in name or "darwin" in name):
-                    url = a["browser_download_url"]; break
-                if not is_mac and ("win" in name or "windows" in name):
-                    url = a["browser_download_url"]; break
+                if is_mac and "mac" in name: url = a["browser_download_url"]; break
+                if not is_mac and "win" in name: url = a["browser_download_url"]; break
             return {"ok": True, "latest": latest, "url": url}
         except Exception:
             return {"ok": False, "latest": "", "url": ""}
@@ -482,7 +489,7 @@ button{padding:6px 16px;border:none;border-radius:6px;font-size:12px;font-weight
 </div>
 <script>
 var lastBody="",lastOriginal="",lastSupplement="";
-// === 更新检查 ===
+// 更新函数定义（不立即执行，等 bridge 就绪）
 async function checkForUpdate(quiet){
   if(quiet)document.getElementById("btnUpdate").textContent="检查中…";
   try{
@@ -507,17 +514,6 @@ async function doUpdate(){
     if(!r||!r.ok)b.innerHTML='更新失败: '+(r?r.error:"请重试")+' <a onclick="doUpdate()" style="color:#ffd60a;cursor:pointer">重试</a>';
   }catch(e){b.innerHTML='更新出错: '+e+' <a onclick="doUpdate()" style="color:#ffd60a;cursor:pointer">重试</a>'}
 }
-// 启动时检查
-window.pywebview.api.check_update().then(function(r){
-  if(r.ok && r.latest && r.url){
-    document.getElementById("updateVer").textContent=r.latest;
-    document.getElementById("updateLink").setAttribute("data-url",r.url);
-    document.getElementById("updateBar").style.display="block";
-    document.getElementById("btnUpdate").textContent="有新版本";
-    document.getElementById("btnUpdate").style.color="#ffd60a";
-    document.getElementById("btnUpdate").style.borderColor="#ffd60a";
-  }
-}).catch(function(){});
 document.getElementById("btnUpdate").onclick=function(){checkForUpdate(true)};
 async function loadProjects(){
   var sel=document.getElementById("projectSelect");sel.innerHTML="";
@@ -536,7 +532,22 @@ function waitBridge(fn){
     if((window.pywebview&&window.pywebview.api)||n>15){clearInterval(t);fn()}
   },300);
 }
-waitBridge(loadProjects);
+waitBridge(function(){
+  loadProjects();
+  // bridge就绪后，启动时静默检查更新
+  setTimeout(function(){
+    window.pywebview.api.check_update().then(function(r){
+      if(r.ok && r.latest && r.url){
+        document.getElementById("updateVer").textContent=r.latest;
+        document.getElementById("updateLink").setAttribute("data-url",r.url);
+        document.getElementById("updateBar").style.display="block";
+        document.getElementById("btnUpdate").textContent="有新版本";
+        document.getElementById("btnUpdate").style.color="#ffd60a";
+        document.getElementById("btnUpdate").style.borderColor="#ffd60a";
+      }
+    }).catch(function(){});
+  },500);
+});
 document.getElementById("modeSelect").onchange=function(){
   var is=this.value==="project";
   document.getElementById("projectSelect").style.display=is?"inline":"none";
