@@ -149,7 +149,10 @@ class Api:
             return {"ok": False, "error": msg, "need_activate": True}
         # 正常翻译逻辑
         combined = original
-        if supplement.strip(): combined = f"{original}\n\n补充：{supplement.strip()}"
+        if supplement.strip():
+            combined = f"{original}\n\n补充：{supplement.strip()}"
+            if mode == "project":
+                self.save_to_memory(original, project_name)
         mem_hint = ""
         if mode == "project":
             if project_name != self.current_project:
@@ -168,13 +171,6 @@ class Api:
             body = to_simplified(body)
             if uncertain: uncertain = to_simplified(uncertain)
             options = [to_simplified(o) for o in options]
-            if mode == "project":
-                try:
-                    mem = self.current_memory
-                    mem.setdefault("最近使用", []).insert(0, (combined or original)[:60])
-                    mem["最近使用"] = mem["最近使用"][:20]
-                    save_memory(project_name, mem)
-                except Exception: pass
             # 后台静默上报用量
             try:
                 threading.Thread(target=_report,
@@ -199,7 +195,17 @@ class Api:
         except Exception: return False
 
     def apply_option(self, original, supplement, option, project_name, mode):
+        self.save_to_memory(original, project_name)
         return self.translate(original, supplement.strip() + "\n（我选：" + option + "）", project_name, mode)
+
+    def save_to_memory(self, text, project_name):
+        """保存原话到记忆本。只在用户有交互价值时调用。"""
+        try:
+            mem = load_memory(project_name)
+            mem.setdefault("最近使用", []).insert(0, text[:60])
+            mem["最近使用"] = mem["最近使用"][:20]
+            save_memory(project_name, mem)
+        except Exception: pass
 
     def check_update(self):
         """检查最新版本。先查 Render 服务器，失败查 GitHub Release。"""
@@ -575,6 +581,7 @@ document.getElementById("btnCopy").onclick=async function(){
   try{
     var ok=await window.pywebview.api.copy_to_clipboard(lastBody);
     st.textContent=ok?"已复制，去粘贴":"复制失败，请再点一次";
+    if(ok)window.pywebview.api.save_to_memory(lastOriginal,document.getElementById("projectSelect").value||"默认项目");
   }catch(e){st.textContent="复制失败："+e}
 };
 document.getElementById("supplementBox").addEventListener("input",function(){lastSupplement=""});
