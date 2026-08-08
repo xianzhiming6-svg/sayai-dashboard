@@ -202,98 +202,66 @@ class Api:
         return self.translate(original, supplement.strip() + "\n（我选：" + option + "）", project_name, mode)
 
     def check_update(self):
-        """检查最新版本：先查 Render 服务器，失败再查 GitHub Release"""
+        """检查最新版本。先查 Render 服务器，失败查 GitHub Release。"""
         try:
             import urllib.request, json
             req = urllib.request.Request("https://sayai-dashboard.onrender.com/version",
                 headers={"User-Agent": "sayai"})
             d = json.loads(urllib.request.urlopen(req, timeout=8).read())
-            version = d.get("version", "")
+            v = d.get("version", "")
             is_mac = platform.system() == "Darwin"
             url = d.get("mac_url") if is_mac else d.get("win_url")
-            if version:
-                return {"ok": True, "latest": version, "url": url or ""}
-        except Exception:
-            pass
-        # fallback: 直连 GitHub
+            if v: return {"ok": True, "latest": v, "url": url or ""}
+        except Exception: pass
         try:
+            import urllib.request, json
             req = urllib.request.Request(
                 "https://api.github.com/repos/xianzhiming6-svg/sayai-dashboard/releases/latest",
                 headers={"User-Agent": "sayai"})
             r = json.loads(urllib.request.urlopen(req, timeout=8).read())
-            latest = (r.get("tag_name") or "").lstrip("v")
-            if not latest: return {"ok": False, "latest": "", "url": ""}
+            v = (r.get("tag_name") or "").lstrip("v")
+            if not v: return {"ok": False, "latest": "", "url": ""}
             is_mac = platform.system() == "Darwin"
-            assets = r.get("assets", [])
             url = ""
-            for a in assets:
-                name = a.get("name", "").lower()
-                if is_mac and "mac" in name: url = a["browser_download_url"]; break
-                if not is_mac and "win" in name: url = a["browser_download_url"]; break
-            return {"ok": True, "latest": latest, "url": url}
-        except Exception:
-            return {"ok": False, "latest": "", "url": ""}
+            for a in r.get("assets", []):
+                n = a.get("name", "").lower()
+                if is_mac and "mac" in n: url = a["browser_download_url"]; break
+                if not is_mac and "win" in n: url = a["browser_download_url"]; break
+            return {"ok": True, "latest": v, "url": url}
+        except Exception: return {"ok": False, "latest": "", "url": ""}
 
     def do_update(self, url):
-        """下载并全自动替换更新。成功后退出当前程序。"""
+        """下载+替换+重启，全自动。"""
         try:
-            import tempfile, zipfile, shutil, subprocess, time
-            st = "下载中..."
-            # 下载
-            import urllib.request
+            import tempfile, zipfile, shutil, subprocess
             tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
             urllib.request.urlretrieve(url, tmp.name)
-            # 解压
             td = tempfile.mkdtemp()
-            with zipfile.ZipFile(tmp.name, 'r') as z:
-                z.extractall(td)
+            with zipfile.ZipFile(tmp.name, 'r') as z: z.extractall(td)
             os.unlink(tmp.name)
-            # 找 .app（Mac）或 .exe（Win）
             is_mac = platform.system() == "Darwin"
             target = None
             for root, dirs, files in os.walk(td):
                 for d in dirs:
-                    if is_mac and d.endswith(".app"):
+                    if (is_mac and d.endswith(".app")) or (not is_mac and d.endswith(".exe")):
                         target = os.path.join(root, d); break
                 if target: break
-            if not target:
-                return {"ok": False, "error": "更新包中没有找到程序文件"}
-            # 当前运行的程序路径
+            if not target: return {"ok": False, "error": "安装包格式不对"}
             import sys
             if getattr(sys, 'frozen', False):
-                current = os.path.dirname(sys.executable)
-                # PyInstaller onedir: .app is 3 levels up from MacOS/executable
-                current_app = os.path.dirname(os.path.dirname(os.path.dirname(current)))
-            else:
-                current_app = os.path.abspath(".")
-            # 写替换脚本
+                cur = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(sys.executable))))
+            else: cur = os.path.abspath(".")
             if is_mac:
-                script = tempfile.NamedTemporaryFile(suffix=".sh", mode="w", delete=False)
-                script.write(f'''#!/bin/bash
-sleep 2
-rm -rf "{current_app}"
-mv "{target}" "{current_app}"
-open "{current_app}"
-rm "$0"
-''')
-                script.close()
-                os.chmod(script.name, 0o755)
-                subprocess.Popen(["/usr/bin/open", "-a", "Terminal", script.name])
+                s = tempfile.NamedTemporaryFile(suffix=".sh", mode="w", delete=False)
+                s.write(f'#!/bin/bash\nsleep 2\nrm -rf "{cur}"\nmv "{target}" "{cur}"\nopen "{cur}"\nrm "$0"\n')
+                s.close(); os.chmod(s.name, 0o755)
+                subprocess.Popen(["/usr/bin/open", "-a", "Terminal", s.name])
             else:
-                script = tempfile.NamedTemporaryFile(suffix=".bat", mode="w", delete=False)
-                script.write(f'''@echo off
-timeout /t 2 /nobreak >nul
-rmdir /s /q "{current_app}"
-move "{target}" "{current_app}"
-start "" "{current_app}"
-del "%~f0"
-''')
-                script.close()
-                subprocess.Popen(["cmd", "/c", script.name])
-            # 退出当前程序
+                s = tempfile.NamedTemporaryFile(suffix=".bat", mode="w", delete=False)
+                s.write(f'@echo off\ntimeout /t 2 /nobreak >nul\nrmdir /s /q "{cur}"\nmove "{target}" "{cur}"\nstart "" "{cur}"\ndel "%~f0"\n')
+                s.close(); subprocess.Popen(["cmd", "/c", s.name])
             os._exit(0)
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
+        except Exception as e: return {"ok": False, "error": str(e)}
 
     def copy_to_clipboard(self, text):
         try:
@@ -489,32 +457,6 @@ button{padding:6px 16px;border:none;border-radius:6px;font-size:12px;font-weight
 </div>
 <script>
 var lastBody="",lastOriginal="",lastSupplement="";
-// 更新函数定义（不立即执行，等 bridge 就绪）
-async function checkForUpdate(quiet){
-  if(quiet)document.getElementById("btnUpdate").textContent="检查中…";
-  try{
-    var r=await window.pywebview.api.check_update();
-    if(r.ok && r.latest){
-      document.getElementById("updateVer").textContent=r.latest;
-      document.getElementById("updateBar").style.display="block";
-      document.getElementById("btnUpdate").textContent="有新版本";
-      document.getElementById("btnUpdate").style.color="#ffd60a";
-      document.getElementById("btnUpdate").style.borderColor="#ffd60a";
-    }else{
-      if(quiet)alert("已是最新版本");
-      document.getElementById("btnUpdate").textContent="更新";
-    }
-  }catch(e){if(quiet)alert("检查失败，请检查网络");document.getElementById("btnUpdate").textContent="更新"}
-}
-async function doUpdate(){
-  var b=document.getElementById("updateBar"),u=document.getElementById("updateVer").textContent;
-  b.innerHTML='下载中…请稍候，完成后会自动重启';
-  try{
-    var r=await window.pywebview.api.do_update(document.getElementById("updateLink").getAttribute("data-url"));
-    if(!r||!r.ok)b.innerHTML='更新失败: '+(r?r.error:"请重试")+' <a onclick="doUpdate()" style="color:#ffd60a;cursor:pointer">重试</a>';
-  }catch(e){b.innerHTML='更新出错: '+e+' <a onclick="doUpdate()" style="color:#ffd60a;cursor:pointer">重试</a>'}
-}
-document.getElementById("btnUpdate").onclick=function(){checkForUpdate(true)};
 async function loadProjects(){
   var sel=document.getElementById("projectSelect");sel.innerHTML="";
   try{
@@ -534,20 +476,33 @@ function waitBridge(fn){
 }
 waitBridge(function(){
   loadProjects();
-  // bridge就绪后，启动时静默检查更新
   setTimeout(function(){
     window.pywebview.api.check_update().then(function(r){
-      if(r.ok && r.latest && r.url){
+      if(r.ok&&r.latest&&r.url){
         document.getElementById("updateVer").textContent=r.latest;
         document.getElementById("updateLink").setAttribute("data-url",r.url);
         document.getElementById("updateBar").style.display="block";
-        document.getElementById("btnUpdate").textContent="有新版本";
+        document.getElementById("btnUpdate").textContent="新版本";
         document.getElementById("btnUpdate").style.color="#ffd60a";
         document.getElementById("btnUpdate").style.borderColor="#ffd60a";
       }
     }).catch(function(){});
   },500);
 });
+// 更新按钮手动检查
+function checkForUpdate(quiet){
+  if(quiet)document.getElementById("btnUpdate").textContent="检查中…";
+  window.pywebview.api.check_update().then(function(r){
+    if(r.ok&&r.latest){document.getElementById("updateVer").textContent=r.latest;document.getElementById("updateBar").style.display="block";document.getElementById("btnUpdate").textContent="新版本"}
+    else{if(quiet)alert("已是最新版本");document.getElementById("btnUpdate").textContent="更新"}
+  }).catch(function(){if(quiet)alert("网络不通");document.getElementById("btnUpdate").textContent="更新"})
+}
+function doUpdate(){
+  var u=document.getElementById("updateLink").getAttribute("data-url");
+  document.getElementById("updateBar").innerHTML='下载中…完成后自动重启';
+  window.pywebview.api.do_update(u).then(function(r){if(!r||!r.ok)document.getElementById("updateBar").innerHTML='失败'}).catch(function(e){document.getElementById("updateBar").innerHTML='出错'+e})
+}
+document.getElementById("btnUpdate").onclick=function(){checkForUpdate(true)};
 document.getElementById("modeSelect").onchange=function(){
   var is=this.value==="project";
   document.getElementById("projectSelect").style.display=is?"inline":"none";
