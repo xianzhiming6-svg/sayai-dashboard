@@ -4,13 +4,11 @@
 PromptBridge 桌面面板 v1.1
 - 翻译、弹选项、补充、单一/多模式、🎤录音转文字
 """
-import webview, json, urllib.request, os, re, subprocess, platform, threading, socket, shutil, sys
+import webview, json, urllib.request, os, re, subprocess, platform, threading, socket, shutil
 from license import check_and_count as _check_license, get_install_id as _install_id, activate as _activate
 from reporter import report_usage as _report
 
 MODEL = "deepseek-v4-flash"
-APP_VERSION = "1.0.1"
-GITHUB_REPO = "xianzhiming6-svg/sayai-dashboard"
 # 安全代理：翻译请求发到 Render 服务器，API Key 只在服务端
 API_URL = "https://sayai-dashboard.onrender.com/translate"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -203,67 +201,128 @@ class Api:
     def apply_option(self, original, supplement, option, project_name, mode):
         return self.translate(original, supplement.strip() + "\n（我选：" + option + "）", project_name, mode)
 
-    def copy_to_clipboard(self, text):
-        """复制到系统剪贴板——优先 subprocess，pywebview 打包后更可靠"""
-        try:
-            if IS_MAC:
-                p = subprocess.run(["/usr/bin/pbcopy"], input=text.encode("utf-8"),
-                    capture_output=True, timeout=10)
-                if p.returncode == 0:
-                    return True
-                # fallback: /usr/bin/osascript
-                import shlex
-                safe = text.replace('"', '\\"').replace('\n', '\\n')
-                subprocess.run(["osascript", "-e", f'set the clipboard to "{safe}"'],
-                    capture_output=True, timeout=10)
-                return True
-            elif IS_WIN:
-                cmd = "powershell -command \"Set-Clipboard -Value ([System.Net.WebUtility]::HtmlDecode('\" + [System.Net.WebUtility]::HtmlEncode('\"' + $input + '\"') + \"'))\""
-                p = subprocess.run(["clip"], input=text.encode("utf-8"),
-                    capture_output=True, timeout=10)
-                return p.returncode == 0
-            return True
-        except Exception:
-            return False
-
     def check_update(self):
-        """启动时检查更新：先查 GitHub Release，失败则查 Render 版本端点"""
-        # 优先查 GitHub Release
+        """检查 GitHub Release 是否有新版本。返回 {ok, latest, url}"""
+        GITHUB = "xianzhiming6-svg/sayai-dashboard"
         try:
+            import urllib.request, json, re
             req = urllib.request.Request(
-                f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
+                f"https://api.github.com/repos/{GITHUB}/releases/latest",
                 headers={"User-Agent": "sayai-check-update"})
-            r = json.loads(urllib.request.urlopen(req, timeout=8).read())
+            r = json.loads(urllib.request.urlopen(req, timeout=10).read())
             latest = (r.get("tag_name") or "").lstrip("v")
-            if latest and latest != APP_VERSION:
-                assets = r.get("assets", [])
-                url = next((a.get("browser_download_url", "") for a in assets
-                            if a.get("name", "").endswith(".zip")), "")
-                return {"ok": True, "latest": latest, "url": url or r.get("html_url", "")}
-            return {"ok": True, "latest": latest, "url": ""}
-        except Exception:
-            pass
-        # fallback：查 Render 服务器版本端点
-        try:
-            req = urllib.request.Request(f"{API_URL.rsplit('/',1)[0]}/version", headers={"User-Agent": "sayai"})
-            d = json.loads(urllib.request.urlopen(req, timeout=8).read())
-            latest = d.get("version", "")
-            mac = d.get("mac_url", "")
-            win = d.get("win_url", "")
-            url = mac if sys.platform == "darwin" else win
-            if latest and latest != APP_VERSION:
-                return {"ok": True, "latest": latest, "url": url}
-            return {"ok": True, "latest": latest, "url": ""}
+            if not latest:
+                return {"ok": False, "latest": "", "url": ""}
+            # 从 assets 里找符合当前系统的下载链接
+            is_mac = platform.system() == "Darwin"
+            assets = r.get("assets", [])
+            url = ""
+            for a in assets:
+                name = a.get("name", "").lower()
+                if is_mac and ("mac" in name or ".app" in name or "darwin" in name):
+                    url = a["browser_download_url"]; break
+                if not is_mac and ("win" in name or "windows" in name):
+                    url = a["browser_download_url"]; break
+            return {"ok": True, "latest": latest, "url": url}
         except Exception:
             return {"ok": False, "latest": "", "url": ""}
 
-    def open_update_url(self, url):
+    def do_update(self, url):
+        """下载并全自动替换更新。成功后退出当前程序。"""
         try:
-            import webbrowser
-            webbrowser.open(url)
+            import tempfile, zipfile, shutil, subprocess, time
+            st = "下载中..."
+            # 下载
+            import urllib.request
+            tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+            urllib.request.urlretrieve(url, tmp.name)
+            # 解压
+            td = tempfile.mkdtemp()
+            with zipfile.ZipFile(tmp.name, 'r') as z:
+                z.extractall(td)
+            os.unlink(tmp.name)
+            # 找 .app（Mac）或 .exe（Win）
+            is_mac = platform.system() == "Darwin"
+            target = None
+            for root, dirs, files in os.walk(td):
+                for d in dirs:
+                    if is_mac and d.endswith(".app"):
+                        target = os.path.join(root, d); break
+                if target: break
+            if not target:
+                return {"ok": False, "error": "更新包中没有找到程序文件"}
+            # 当前运行的程序路径
+            import sys
+            if getattr(sys, 'frozen', False):
+                current = os.path.dirname(sys.executable)
+                # PyInstaller onedir: .app is 3 levels up from MacOS/executable
+                current_app = os.path.dirname(os.path.dirname(os.path.dirname(current)))
+            else:
+                current_app = os.path.abspath(".")
+            # 写替换脚本
+            if is_mac:
+                script = tempfile.NamedTemporaryFile(suffix=".sh", mode="w", delete=False)
+                script.write(f'''#!/bin/bash
+sleep 2
+rm -rf "{current_app}"
+mv "{target}" "{current_app}"
+open "{current_app}"
+rm "$0"
+''')
+                script.close()
+                os.chmod(script.name, 0o755)
+                subprocess.Popen(["/usr/bin/open", "-a", "Terminal", script.name])
+            else:
+                script = tempfile.NamedTemporaryFile(suffix=".bat", mode="w", delete=False)
+                script.write(f'''@echo off
+timeout /t 2 /nobreak >nul
+rmdir /s /q "{current_app}"
+move "{target}" "{current_app}"
+start "" "{current_app}"
+del "%~f0"
+''')
+                script.close()
+                subprocess.Popen(["cmd", "/c", script.name])
+            # 退出当前程序
+            os._exit(0)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def copy_to_clipboard(self, text):
+        try:
+            if IS_MAC:
+                try:
+                    from AppKit import NSPasteboard, NSPasteboardTypeString
+                    pb = NSPasteboard.generalPasteboard()
+                    pb.clearContents()
+                    pb.setString_forType_(text, NSPasteboardTypeString)
+                    return True
+                except Exception:
+                    p = subprocess.run(["/usr/bin/pbcopy"], input=text.encode("utf-8"),
+                        capture_output=True, timeout=10)
+                    return p.returncode == 0
+            elif IS_WIN:
+                import ctypes
+                CF_UNICODETEXT = 13
+                GMEM_MOVEABLE = 0x0002
+                user32 = ctypes.windll.user32
+                kernel32 = ctypes.windll.kernel32
+                if not user32.OpenClipboard(0):
+                    return False
+                try:
+                    user32.EmptyClipboard()
+                    data = text.encode("utf-16-le") + b"\x00\x00"
+                    h = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
+                    if h:
+                        p = kernel32.GlobalLock(h)
+                        ctypes.memmove(p, data, len(data))
+                        kernel32.GlobalUnlock(h)
+                        user32.SetClipboardData(CF_UNICODETEXT, h)
+                finally:
+                    user32.CloseClipboard()
+                return True
             return True
-        except Exception:
-            return False
+        except Exception: return False
 
     def get_projects(self): return list_projects()
 
@@ -391,8 +450,8 @@ button{padding:6px 16px;border:none;border-radius:6px;font-size:12px;font-weight
 .result-label{font-size:11px;color:#9d9d9d;margin-bottom:2px}
 #resultBox{flex:1;background:#2d2d30;border:1px solid #3a3a3c;border-radius:6px;padding:10px;font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-y:auto;min-height:180px}
 </style></head><body>
-<div class="header"><span class="title">说AI懂的话</span><span class="sub">白话 → AI能懂的话</span></div>
-<div id="updateBar" style="display:none;background:#2d2d00;border-bottom:1px solid #555;padding:6px 14px;font-size:11px;color:#ffd60a">发现新版本 v<span id="updateVer"></span>，<a id="updateLink" style="color:#ffd60a;cursor:pointer;text-decoration:underline">点击下载更新</a></div>
+<div class="header"><span class="title">说AI懂的话</span><span class="sub">白话 → AI能懂的话</span><button id="btnUpdate" title="检查更新" style="margin-left:auto;background:transparent;color:#9d9d9d;border:1px solid #555;padding:2px 8px;border-radius:4px;font-size:10px;cursor:pointer">更新</button></div>
+<div id="updateBar" style="display:none;background:#2d2d00;border-bottom:1px solid #555;padding:6px 14px;font-size:11px;color:#ffd60a">发现新版本 v<span id="updateVer"></span> — <a id="updateLink" style="color:#ffd60a;cursor:pointer;text-decoration:underline" onclick="doUpdate()">点击自动更新</a></div>
 <div class="mode-bar">
   <div class="mode-field">
     <label for="modeSelect">模式</label>
@@ -423,13 +482,43 @@ button{padding:6px 16px;border:none;border-radius:6px;font-size:12px;font-weight
 </div>
 <script>
 var lastBody="",lastOriginal="",lastSupplement="";
+// === 更新检查 ===
+async function checkForUpdate(quiet){
+  if(quiet)document.getElementById("btnUpdate").textContent="检查中…";
+  try{
+    var r=await window.pywebview.api.check_update();
+    if(r.ok && r.latest){
+      document.getElementById("updateVer").textContent=r.latest;
+      document.getElementById("updateBar").style.display="block";
+      document.getElementById("btnUpdate").textContent="有新版本";
+      document.getElementById("btnUpdate").style.color="#ffd60a";
+      document.getElementById("btnUpdate").style.borderColor="#ffd60a";
+    }else{
+      if(quiet)alert("已是最新版本");
+      document.getElementById("btnUpdate").textContent="更新";
+    }
+  }catch(e){if(quiet)alert("检查失败，请检查网络");document.getElementById("btnUpdate").textContent="更新"}
+}
+async function doUpdate(){
+  var b=document.getElementById("updateBar"),u=document.getElementById("updateVer").textContent;
+  b.innerHTML='下载中…请稍候，完成后会自动重启';
+  try{
+    var r=await window.pywebview.api.do_update(document.getElementById("updateLink").getAttribute("data-url"));
+    if(!r||!r.ok)b.innerHTML='更新失败: '+(r?r.error:"请重试")+' <a onclick="doUpdate()" style="color:#ffd60a;cursor:pointer">重试</a>';
+  }catch(e){b.innerHTML='更新出错: '+e+' <a onclick="doUpdate()" style="color:#ffd60a;cursor:pointer">重试</a>'}
+}
+// 启动时检查
 window.pywebview.api.check_update().then(function(r){
-  if(r&&r.ok&&r.latest&&r.url){
+  if(r.ok && r.latest && r.url){
     document.getElementById("updateVer").textContent=r.latest;
-    document.getElementById("updateLink").onclick=function(){window.pywebview.api.open_update_url(r.url)};
-    document.getElementById("updateBar").style.display="block"
+    document.getElementById("updateLink").setAttribute("data-url",r.url);
+    document.getElementById("updateBar").style.display="block";
+    document.getElementById("btnUpdate").textContent="有新版本";
+    document.getElementById("btnUpdate").style.color="#ffd60a";
+    document.getElementById("btnUpdate").style.borderColor="#ffd60a";
   }
 }).catch(function(){});
+document.getElementById("btnUpdate").onclick=function(){checkForUpdate(true)};
 async function loadProjects(){
   var sel=document.getElementById("projectSelect");sel.innerHTML="";
   try{
@@ -448,26 +537,6 @@ function waitBridge(fn){
   },300);
 }
 waitBridge(loadProjects);
-// 自定义弹窗（pywebview 的 WKWebView 禁了原生 prompt/alert/confirm）
-var _dialogCb=null,_dialogInput=null;
-function showDialog(title,msg,hasInput,cb){
-  var d=document.getElementById('_customDialog');
-  if(!d){
-    d=document.createElement('div');d.id='_customDialog';
-    d.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:9999';
-    d.innerHTML='<div style="background:#2d2d30;border-radius:8px;padding:16px;min-width:260px;max-width:340px"><div id="_dTitle" style="color:#e8e8e8;font-size:13px;font-weight:600;margin-bottom:8px"></div><div id="_dInputC" style="display:none;margin-bottom:8px"><input id="_dInput" style="width:100%;background:#3a3a3c;color:#e8e8e8;border:1px solid #555;border-radius:4px;padding:6px 10px;font-size:12px"/></div><div id="_dMsg" style="color:#9d9d9d;font-size:12px;margin-bottom:12px;line-height:1.5"></div><div style="display:flex;gap:8px;justify-content:flex-end"><button id="_dCancel" style="background:#3a3a3c;color:#e8e8e8;padding:5px 14px;border-radius:4px;font-size:11px;border:none;cursor:pointer">取消</button><button id="_dOk" style="background:#0a84ff;color:#fff;padding:5px 14px;border-radius:4px;font-size:11px;border:none;cursor:pointer">确定</button></div></div>';
-    document.body.appendChild(d);
-  }
-  document.getElementById('_dTitle').textContent=title;document.getElementById('_dMsg').textContent=msg||'';
-  var ic=document.getElementById('_dInputC'),ip=document.getElementById('_dInput');
-  if(hasInput){ic.style.display='block';ip.value='';ip.focus()}else ic.style.display='none';
-  d.style.display='flex';
-  document.getElementById('_dOk').onclick=function(){d.style.display='none';if(cb)cb(hasInput?ip.value.trim():true)};
-  document.getElementById('_dCancel').onclick=function(){d.style.display='none';if(cb)cb(hasInput?'':false)}
-}
-function _alert(m){showDialog('提示',m,false,null)}
-function _confirm(m,cb){showDialog('确认',m,false,cb)}
-function _prompt(m,cb){showDialog('输入',m,true,cb)}
 document.getElementById("modeSelect").onchange=function(){
   var is=this.value==="project";
   document.getElementById("projectSelect").style.display=is?"inline":"none";
@@ -475,17 +544,19 @@ document.getElementById("modeSelect").onchange=function(){
   document.getElementById("btnDelProject").style.display=is?"inline":"none"
 };
 document.getElementById("modeSelect").onchange();
-document.getElementById("btnNewProject").onclick=function(){
-  _prompt("请输入项目名称：",function(n){if(!n)return;
-    window.pywebview.api.create_project(n).then(function(ok){if(ok){loadProjects();document.getElementById("projectSelect").value=n}else _alert("项目已存在")}).catch(function(e){_alert("失败:"+e)})
-  })
+document.getElementById("btnNewProject").onclick=async function(){
+  var n=prompt("项目名称：");if(!n)return;
+  try{var ok=await window.pywebview.api.create_project(n);if(ok){loadProjects();document.getElementById("projectSelect").value=n}else alert("项目已存在")}catch(e){alert("失败:"+e)}
 };
-document.getElementById("btnDelProject").onclick=function(){
+document.getElementById("btnDelProject").onclick=async function(){
   var p=document.getElementById("projectSelect").value||"";
-  if(!p||p==="默认项目"){_alert("没有可删除的项目");return}
-  _confirm("确定删除项目「"+p+"」吗？会同时删除它的记忆文件",function(ok){if(!ok)return;
-    window.pywebview.api.delete_project(p).then(function(ok){if(ok){_alert("已删除");loadProjects();document.getElementById("projectSelect").value="默认项目"}else _alert("删除失败")}).catch(function(e){_alert("失败:"+e)})
-  })
+  if(!p||p==="默认项目"){alert("没有可删除的项目");return}
+  if(!confirm("确定删除项目「"+p+"」吗？会同时删除它的记忆文件"))return;
+  try{
+    var ok=await window.pywebview.api.delete_project(p);
+    if(ok){alert("已删除");loadProjects();document.getElementById("projectSelect").value="默认项目"}
+    else alert("删除失败")
+  }catch(e){alert("失败:"+e)}
 };
 function showUncertain(u,opts){
   var b=document.getElementById("uncertainBox");
