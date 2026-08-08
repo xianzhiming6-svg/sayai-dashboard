@@ -79,14 +79,31 @@ class Handler(BaseHTTPRequestHandler):
                 "daily":[dict(r) for r in daily], "total_tokens":total_tokens, 
                 "total_cost":round(total_cost,4), "total_users":total_users, "today":today}, ensure_ascii=False).encode())
         elif self.path == "/version":
+            # 从 GitHub Release 获取最新版本信息，失败时使用硬编码版本
+            version = "1.1.0"
+            mac_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/说AI懂的话-Mac-更新版.zip"
+            win_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/说AI懂的话-Windows.zip"
+            try:
+                req = urllib.request.Request(
+                    "https://api.github.com/repos/xianzhiming6-svg/sayai-dashboard/releases/latest",
+                    headers={"User-Agent": "sayai-server/1.0"})
+                r = json.loads(urllib.request.urlopen(req, timeout=8).read())
+                latest = (r.get("tag_name") or "").lstrip("v")
+                if latest:
+                    version = latest
+                    assets = r.get("assets", [])
+                    for a in assets:
+                        name = a.get("name", "")
+                        if "Mac" in name: mac_url = a["browser_download_url"]
+                        if "Windows" in name: win_url = a["browser_download_url"]
+            except Exception:
+                pass
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps({
-                "version": "1.0.0",
-                "mac_url": "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-mac.zip",
-                "win_url": "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-win.zip"
+                "version": version, "mac_url": mac_url, "win_url": win_url
             }).encode())
         elif self.path == "/" or self.path == "":
             html = DASHBOARD_HTML
