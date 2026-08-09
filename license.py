@@ -48,20 +48,37 @@ def check_and_count():
     return False, 0, "免费额度已用完，请联系作者获取激活码"
 
 def activate(code):
-    """用激活码激活"""
-    # 简单验证：激活码 = SHA256(install_id + 作者密钥) 前 16 位
-    SECRET = "sayai_2026_secret_key_xzm"  # 不要泄露
+    """激活：调用服务器验证"""
+    import urllib.request as _r, json as _j
     u = load_usage()
-    expected = hashlib.sha256((u.get("install_id", get_install_id()) + SECRET).encode()).hexdigest()[:16]
-    if code == expected:
-        u["activated"] = True
-        save_usage(u)
-        return True, "激活成功！"
-    return False, "激活码无效"
+    iid = u.get("install_id", get_install_id())
+    try:
+        d = _j.dumps({"install_id": iid, "code": code}).encode()
+        req = _r.Request("https://sayai-dashboard.onrender.com/activate",
+            data=d, headers={"Content-Type":"application/json"})
+        resp = _j.loads(_r.urlopen(req, timeout=10).read())
+        if resp.get("ok"):
+            u["activated"] = True
+            u["expires"] = resp.get("expires", "")
+            save_usage(u)
+            return True, f"激活成功！有效期至 {resp.get('expires','')}"
+        return False, "激活码无效"
+    except Exception as e:
+        return False, f"网络错误: {e}"
 
 def generate_activation(install_id):
     """作者专用：根据用户 install_id 生成激活码"""
-    SECRET = "sayai_2026_secret_key_xzm"
+    SECRET = os.environ.get("LICENSE_SECRET", "")
+    if not SECRET:
+        # 从 ~/.hermes/.env 读取
+        try:
+            with open(os.path.expanduser("~/.hermes/.env")) as f:
+                for line in f:
+                    if line.startswith("LICENSE_SECRET="):
+                        SECRET = line.split("=",1)[1].strip()
+        except Exception: pass
+    if not SECRET:
+        return "错误：未设置 LICENSE_SECRET"
     return hashlib.sha256((install_id + SECRET).encode()).hexdigest()[:16]
 
 # 命令行：作者生成激活码

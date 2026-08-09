@@ -619,6 +619,11 @@ HTML = HTML.replace("</script>", ACTIVATE_JS + "\n</script>")
 def main():
     if not _acquire_single_instance():
         return
+    # macOS：让App在Dock中显示图标，支持右键退出
+    try:
+        from AppKit import NSApplication, NSApplicationActivationPolicyRegular
+        NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyRegular)
+    except Exception: pass
     webview.create_window("说AI懂的话", html=HTML, width=420, height=680,
                           min_size=(360,500), js_api=api, background_color="#1e1e1e")
     webview.start()
