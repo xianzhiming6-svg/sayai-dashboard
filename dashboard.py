@@ -40,6 +40,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
+        elif self.path == "/activate":
+            LIC = os.environ.get("LICENSE_SECRET", "REDACTED")
+            cl = int(self.headers.get("Content-Length", 0))
+            data = json.loads(self.rfile.read(cl)) if cl else {}
+            iid = data.get("install_id", "")
+            code = data.get("code", "")
+            expected = hashlib.sha256((iid + LIC).encode()).hexdigest()[:16]
+            ok = (code == expected)
+            expires = ""
+            if ok:
+                import time as _t
+                expires = _t.strftime("%Y-%m-%d", _t.localtime(_t.time() + 30*86400))
+                with sqlite3.connect(DB) as c:
+                    c.execute("CREATE TABLE IF NOT EXISTS activations (install_id TEXT PRIMARY KEY, activated_at TEXT, expires_at TEXT)")
+                    c.execute("INSERT OR REPLACE INTO activations VALUES (?,?,?)", (iid, _t.strftime("%Y-%m-%d"), expires))
+            self.send_response(200); self.send_header("Content-Type","application/json"); self.send_header("Access-Control-Allow-Origin","*"); self.end_headers()
+            self.wfile.write(json.dumps({"ok":ok,"expires":expires}).encode())
         else:
             self.send_response(404); self.end_headers()
 
@@ -109,23 +126,6 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({
                 "version": version, "mac_url": mac_url, "win_url": win_url
             }).encode())
-        elif self.path == "/activate" and self.command == "POST":
-            LIC = os.environ.get("LICENSE_SECRET", "REDACTED")
-            cl = int(self.headers.get("Content-Length", 0))
-            data = json.loads(self.rfile.read(cl)) if cl else {}
-            iid = data.get("install_id", "")
-            code = data.get("code", "")
-            expected = hashlib.sha256((iid + LIC).encode()).hexdigest()[:16]
-            ok = (code == expected)
-            expires = ""
-            if ok:
-                import time as _t
-                expires = _t.strftime("%Y-%m-%d", _t.localtime(_t.time() + 30*86400))
-                with sqlite3.connect(DB) as c:
-                    c.execute("CREATE TABLE IF NOT EXISTS activations (install_id TEXT PRIMARY KEY, activated_at TEXT, expires_at TEXT)")
-                    c.execute("INSERT OR REPLACE INTO activations VALUES (?,?,?)", (iid, _t.strftime("%Y-%m-%d"), expires))
-            self.send_response(200); self.send_header("Content-Type","application/json"); self.send_header("Access-Control-Allow-Origin","*"); self.end_headers()
-            self.wfile.write(json.dumps({"ok":ok,"expires":expires}).encode())
         elif self.path == "/check_activation":
             iid = self.path.split("?id=")[-1] if "?id=" in self.path else ""
             active = False; expires = ""
