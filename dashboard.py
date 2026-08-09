@@ -126,7 +126,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({
                 "version": version, "mac_url": mac_url, "win_url": win_url
             }).encode())
-        elif self.path == "/check_activation":
+        elif self.path.startswith("/check_activation"):
             iid = self.path.split("?id=")[-1] if "?id=" in self.path else ""
             active = False; expires = ""
             if iid:
