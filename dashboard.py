@@ -129,6 +129,12 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/check_activation"):
             iid = self.path.split("?id=")[-1] if "?id=" in self.path else ""
             active = False; expires = ""
+            if not iid and hasattr(self, 'rfile'):
+                try:
+                    cl = int(self.headers.get("Content-Length", 0))
+                    data = json.loads(self.rfile.read(cl)) if cl else {}
+                    iid = data.get("install_id", "")
+                except Exception: pass
             if iid:
                 with sqlite3.connect(DB) as c:
                     r = c.execute("SELECT expires_at FROM activations WHERE install_id=? AND expires_at>=date('now')", (iid,)).fetchone()
