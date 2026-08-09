@@ -5,7 +5,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/version-1.2.0-blue" alt="version">
   <img src="https://img.shields.io/badge/platform-Mac%20%7C%20Windows-lightgrey" alt="platform">
-  <img src="https://img.shields.io/badge/license-付费激活-orange" alt="license">
   <img src="https://img.shields.io/badge/翻译API-DeepSeek%20V4-green" alt="api">
 </p>
 
@@ -117,10 +116,7 @@
 A: 需要。翻译请求发给 DeepSeek 服务器，语音识别完全本地不需要联网。
 
 **Q: 支持哪些 AI 对话模型？**
-A: 翻译结果适用于所有主流 AI——ChatGPT、DeepSeek、Kimi、Claude、通义千问、文心一言等。
-
-**Q: 激活码可以多台电脑用吗？**
-A: 每台电脑有唯一的安装 ID，激活码绑定单台设备。
+A: 翻译结果适用于所有主流 AI——ChatGPT、DeepSeek、Kimi、Claude、通义千问、文心一言等。*
 
 ---
 
