@@ -141,6 +141,19 @@ class Api:
         self._audio_chunks = []
         self._rec_fs = 16000
         self._rec_stream = None
+        # 恢复上次关闭时的项目
+        try:
+            _sf = os.path.join(os.path.dirname(MEMORY_DIR), "state.json")
+            if os.path.isfile(_sf):
+                with open(_sf) as f: _s = json.load(f)
+                p = _s.get("project", "")
+                if p and os.path.isfile(os.path.join(MEMORY_DIR, p + ".json")):
+                    self.current_project = p
+                    self.current_memory = load_memory(p)
+        except Exception: pass
+    
+    def get_saved_project(self):
+        return self.current_project
 
     def translate(self, original, supplement, project_name, mode):
         # 授权检查
@@ -158,6 +171,13 @@ class Api:
             if project_name != self.current_project:
                 self.current_project = project_name
                 self.current_memory = load_memory(project_name)
+                # 保存当前项目到状态文件，关闭窗口重开后恢复
+                try:
+                    _sdir = os.path.dirname(MEMORY_DIR)
+                    os.makedirs(_sdir, exist_ok=True)
+                    with open(os.path.join(_sdir, "state.json"), "w") as f:
+                        json.dump({"project": project_name}, f)
+                except Exception: pass
             mem = self.current_memory
             for w, t in mem.get("指代", {}).items():
                 if w in combined: combined = combined.replace(w, t)
@@ -467,7 +487,9 @@ async function loadProjects(){
   var sel=document.getElementById("projectSelect");sel.innerHTML="";
   try{
     var projects=await window.pywebview.api.get_projects();
-    projects.forEach(function(p){var o=document.createElement("option");o.value=p;o.textContent=p;sel.appendChild(o)})
+    projects.forEach(function(p){var o=document.createElement("option");o.value=p;o.textContent=p;sel.appendChild(o)});
+    // 恢复上次选择的项目
+    try{var s=await window.pywebview.api.get_saved_project();if(s)sel.value=s;}catch(e){}
   }catch(e){
     var o=document.createElement("option");o.value="默认项目";o.textContent="默认项目";sel.appendChild(o);
     document.getElementById("status").textContent="项目列表读取失败:"+e
@@ -619,13 +641,39 @@ HTML = HTML.replace("</script>", ACTIVATE_JS + "\n</script>")
 def main():
     if not _acquire_single_instance():
         return
-    # macOS：让App在Dock中显示图标，支持右键退出
+    # macOS Dock 行为：关窗口=隐藏，点Dock=恢复，右键=退出
     try:
-        from AppKit import NSApplication, NSApplicationActivationPolicyRegular
-        NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyRegular)
-    except Exception: pass
-    webview.create_window("说AI懂的话", html=HTML, width=420, height=680,
-                          min_size=(360,500), js_api=api, background_color="#1e1e1e")
-    webview.start()
+        from AppKit import NSApplication, NSApp, NSObject, NSApplicationActivationPolicyRegular
+        import objc
+        
+        NSApplication.sharedApplication()
+        NSApp().setActivationPolicy_(NSApplicationActivationPolicyRegular)
+        
+        # AppDelegate 只处理 Dock 点击恢复
+        class AppDelegate(NSObject):
+            def init(self):
+                self = objc.super(AppDelegate, self).init()
+                return self
+            def applicationShouldHandleReopen_hasVisibleWindows_(self, app, flag):
+                """点 Dock 图标 → 重新打开窗口"""
+                webview.create_window("说AI懂的话", html=HTML, width=420, height=680,
+                    min_size=(360,500), js_api=api, background_color="#1e1e1e")
+                webview.start(gui='cocoa')
+                return False
+            def applicationShouldTerminateAfterLastWindowClosed_(self, app):
+                return False  # 关窗口不退出
+        
+        NSApp().setDelegate_(AppDelegate.alloc().init())
+        
+        # 先打开第一个窗口，再进入事件循环
+        webview.create_window("说AI懂的话", html=HTML, width=420, height=680,
+                              min_size=(360,500), js_api=api, background_color="#1e1e1e")
+        webview.start(gui='cocoa')
+        # 窗口关闭后保持运行，等待 Dock 点击
+        NSApp().run()
+    except Exception:
+        webview.create_window("说AI懂的话", html=HTML, width=420, height=680,
+                              min_size=(360,500), js_api=api, background_color="#1e1e1e")
+        webview.start()
 
 if __name__ == "__main__": main()

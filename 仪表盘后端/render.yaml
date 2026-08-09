@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: sayai-dashboard
+    env: python
+    buildCommand: ""
+    startCommand: python dashboard.py
+    plan: free
