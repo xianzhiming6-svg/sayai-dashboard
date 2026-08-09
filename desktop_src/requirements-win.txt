@@ -1,7 +1,6 @@
-# 说AI懂的话 - Windows 桌面版依赖
 pywebview
-opencc-python
-faster-whisper
 sounddevice
 numpy
+faster-whisper
 PyInstaller
+typing_extensions
