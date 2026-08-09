@@ -450,7 +450,7 @@ button{padding:6px 16px;border:none;border-radius:6px;font-size:12px;font-weight
   </div>
   <label for="supplementBox">补充（翻译不够时加话，可留空）：</label>
   <textarea id="supplementBox" placeholder="比如：还要能离线用"></textarea>
-  <div id="activateBox"><p>免费额度已用完</p><p style="font-size:10px;color:#888" id="activateId"></p><input id="activateCode" placeholder="输入激活码"><button onclick="doActivate()">激活</button><div class="msg" id="activateMsg"></div></div>
+  <div id="activateBox"><p>免费额度已用完</p><p style="font-size:10px;color:#888" id="activateId"></p><p style="color:#c4a0ff;font-size:11px;margin:8px 0">添加微信 <b>ZMyyPY0710</b> 获取激活码</p><input id="activateCode" placeholder="输入激活码"><button onclick="doActivate()">激活</button><div class="msg" id="activateMsg"></div></div>
   <div class="btn-row">
     <button id="btnTranslate">翻译 →</button>
     <button id="btnCopy" disabled>复制指令</button>
