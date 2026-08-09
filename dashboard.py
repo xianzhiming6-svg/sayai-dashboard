@@ -58,6 +58,10 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             return {"error": str(e)}
 
+    def do_HEAD(self):
+        """Render 健康检查"""
+        self.send_response(200); self.end_headers()
+
     def do_GET(self):
         if self.path == "/api/stats":
             with sqlite3.connect(DB) as c:
