@@ -228,17 +228,9 @@ class Api:
         except Exception: pass
 
     def check_update(self):
-        """检查最新版本。先查 Render 服务器，失败查 GitHub Release。"""
-        try:
-            import urllib.request, json
-            req = urllib.request.Request("https://sayai-dashboard.onrender.com/version",
-                headers={"User-Agent": "sayai"})
-            d = json.loads(urllib.request.urlopen(req, timeout=8).read())
-            v = d.get("version", "")
-            is_mac = platform.system() == "Darwin"
-            url = d.get("mac_url") if is_mac else d.get("win_url")
-            if v: return {"ok": True, "latest": v, "url": url or ""}
-        except Exception: pass
+        """检查最新版本。先查 GitHub Release（按芯片选包），失败再查 Render 服务器。"""
+        is_mac = platform.system() == "Darwin"
+        arch_tag = "x64" if is_mac and platform.machine().lower() in ("x86_64", "amd64") else "arm64"
         try:
             import urllib.request, json
             req = urllib.request.Request(
@@ -246,15 +238,26 @@ class Api:
                 headers={"User-Agent": "sayai"})
             r = json.loads(urllib.request.urlopen(req, timeout=8).read())
             v = (r.get("tag_name") or "").lstrip("v")
-            if not v: return {"ok": False, "latest": "", "url": ""}
-            is_mac = platform.system() == "Darwin"
-            url = ""
-            for a in r.get("assets", []):
-                n = a.get("name", "").lower()
-                if is_mac and "mac" in n: url = a["browser_download_url"]; break
-                if not is_mac and "win" in n: url = a["browser_download_url"]; break
-            return {"ok": True, "latest": v, "url": url}
-        except Exception: return {"ok": False, "latest": "", "url": ""}
+            if v:
+                url = ""
+                for a in r.get("assets", []):
+                    n = a.get("name", "").lower()
+                    if is_mac and "mac" in n and arch_tag in n:
+                        url = a["browser_download_url"]; break
+                    if not is_mac and "win" in n:
+                        url = a["browser_download_url"]; break
+                if url: return {"ok": True, "latest": v, "url": url}
+        except Exception: pass
+        try:
+            import urllib.request, json
+            req = urllib.request.Request("https://sayai-dashboard.onrender.com/version",
+                headers={"User-Agent": "sayai"})
+            d = json.loads(urllib.request.urlopen(req, timeout=8).read())
+            v = d.get("version", "")
+            url = d.get("mac_url") if is_mac else d.get("win_url")
+            if v: return {"ok": True, "latest": v, "url": url or ""}
+        except Exception: pass
+        return {"ok": False, "latest": "", "url": ""}
 
     def do_update(self, url):
         """下载+替换+重启，全自动。"""

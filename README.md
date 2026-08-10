@@ -57,10 +57,14 @@
 ### 一、安装说明
 
 #### Mac 版
-1. 下载 `sayai-mac.dmg` → 双击打开
-2. 把 `说AI懂的话` 拖到 `Applications` 文件夹
-3. 双击打开 App
-4. 语音权限提示 → 点「允许」
+1. 先看电脑芯片：左上角  → 关于本机 → 芯片
+   - **Apple 芯片**（M1 / M2 / M3 等）→ 下载 `sayai-mac-arm64.zip`
+   - **Intel 芯片** → 下载 `sayai-mac-x64.zip`
+2. 双击解压 → 把 `说AI懂的话.app` 拖到「应用程序」文件夹
+3. 第一次打开：**右键点击** App 图标 → 选择「打开」→ 弹出提示后点「打开」
+4. 如果仍提示“已损坏，无法打开”：打开「终端」，输入下面命令后回车，再打开 App：
+   `xattr -dr com.apple.quarantine "/Applications/说AI懂的话.app"`
+5. 语音权限提示 → 点「允许」
 
 #### Windows 版
 1. 下载 `sayai-win-v2.zip` → 右键解压
@@ -124,4 +128,3 @@ A: 翻译结果适用于所有主流 AI——ChatGPT、DeepSeek、Kimi、Claude�
 - 微信：ZMyyPY0710
 - 邮箱：xianzhiming6@gmail.com
 - GitHub：[@xianzhiming6-svg](https://github.com/xianzhiming6-svg)
-
