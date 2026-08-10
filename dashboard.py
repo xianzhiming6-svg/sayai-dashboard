@@ -102,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/version":
             # 从 GitHub Release 获取最新版本信息，失败时使用硬编码版本
             version = "1.2.0"
-            mac_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-mac.dmg"
+            mac_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-mac-arm64.zip"
             win_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-win-v2.zip"
             try:
                 req = urllib.request.Request(
@@ -115,8 +115,9 @@ class Handler(BaseHTTPRequestHandler):
                     assets = r.get("assets", [])
                     for a in assets:
                         name = a.get("name", "")
-                        if "Mac" in name: mac_url = a["browser_download_url"]
-                        if "Windows" in name: win_url = a["browser_download_url"]
+                        low = name.lower()
+                        if "mac" in low and "arm64" in low: mac_url = a["browser_download_url"]
+                        if "win" in low and low.endswith(".zip"): win_url = a["browser_download_url"]
             except Exception:
                 pass
             self.send_response(200)
