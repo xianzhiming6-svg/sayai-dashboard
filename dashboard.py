@@ -102,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/version":
             # 从 GitHub Release 获取最新版本信息，失败时使用硬编码版本
             version = "1.2.0"
-            mac_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-mac.zip"
+            mac_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-mac.dmg"
             win_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-win-v2.zip"
             try:
                 req = urllib.request.Request(
