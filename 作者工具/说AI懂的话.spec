@@ -1,9 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('license.py', '.'), ('reporter.py', '.')]
+datas = [('license.py', '.'), ('reporter.py', '.'), ('whisper-base', 'whisper-base')]
 binaries = []
-hiddenimports = ['sounddevice', 'faster_whisper', 'numpy', 'ctranslate2', 'tokenizers', 'huggingface_hub', 'AppKit', 'objc']
+hiddenimports = ['sounddevice', 'faster_whisper', 'numpy', 'ctranslate2', 'tokenizers', 'huggingface_hub', 'AppKit']
 tmp_ret = collect_all('webview')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('sounddevice')
