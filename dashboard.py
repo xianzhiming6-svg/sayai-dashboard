@@ -101,9 +101,9 @@ class Handler(BaseHTTPRequestHandler):
                 "total_cost":round(total_cost,4), "total_users":total_users, "today":today}, ensure_ascii=False).encode())
         elif self.path == "/version":
             # 从 GitHub Release 获取最新版本信息，失败时使用硬编码版本
-            version = "1.1.0"
-            mac_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/说AI懂的话-Mac-更新版.zip"
-            win_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/说AI懂的话-Windows.zip"
+            version = "1.2.0"
+            mac_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-mac.zip"
+            win_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-win-v2.zip"
             try:
                 req = urllib.request.Request(
                     "https://api.github.com/repos/xianzhiming6-svg/sayai-dashboard/releases/latest",
