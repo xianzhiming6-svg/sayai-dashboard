@@ -120,15 +120,37 @@ def parse_uncertain(text):
 
 def load_memory(project):
     try:
-        with open(os.path.join(MEMORY_DIR, f"{project}.json")) as f: return json.load(f)
-    except Exception: return {"指代": {}, "纠错": {}, "最近使用": []}
+        with open(os.path.join(MEMORY_DIR, f"{project}.json")) as f:
+            mem = json.load(f)
+    except Exception:
+        return {"事实": [], "记录": [], "指代": {}}
+    # 兼容旧格式迁移
+    if "最近使用" in mem and "记录" not in mem:
+        old = mem.pop("最近使用", [])
+        mem["记录"] = [{"原话": t, "指令": "", "回译": "", "时间": ""} for t in old]
+    if "纠错" in mem:
+        mem.pop("纠错", None)
+    mem.setdefault("事实", [])
+    mem.setdefault("记录", [])
+    mem.setdefault("指代", {})
+    return mem
 
 def save_memory(project, mem):
-    if len(mem.get("指代", {})) > 200:
-        keys = list(mem["指代"].keys())
-        for k in keys[:len(keys)-200]: del mem["指代"][k]
-    with open(os.path.join(MEMORY_DIR, f"{project}.json"), "w") as f:
-        json.dump(mem, f, ensure_ascii=False, indent=2)
+    fp = os.path.join(MEMORY_DIR, f"{project}.json")
+    tmp = fp + ".tmp"
+    bak = fp + ".backup"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(mem, f, ensure_ascii=False, indent=2)
+        if os.path.exists(fp):
+            try: os.replace(fp, bak)
+            except Exception: pass
+        os.replace(tmp, fp)
+    except Exception:
+        try:
+            with open(fp, "w") as f:
+                json.dump(mem, f, ensure_ascii=False, indent=2)
+        except Exception: pass
 
 def list_projects():
     return sorted([f[:-5] for f in os.listdir(MEMORY_DIR) if f.endswith(".json")]) or ["默认项目"]
@@ -147,26 +169,49 @@ class Api:
         ok, rem, msg = _check_license()
         if not ok:
             return {"ok": False, "error": msg, "need_activate": True}
-        # 正常翻译逻辑
         combined = original
         if supplement.strip():
             combined = f"{original}\n\n补充：{supplement.strip()}"
-            if mode == "project":
-                self.save_to_memory(original, project_name)
-        mem_hint = ""
+        # 构建分层上下文
+        sys_extra = ""
+        user_prefix = ""
         if mode == "project":
             if project_name != self.current_project:
                 self.current_project = project_name
                 self.current_memory = load_memory(project_name)
             mem = self.current_memory
-            for w, t in mem.get("指代", {}).items():
-                if w in combined: combined = combined.replace(w, t)
-            recent = mem.get("最近使用", [])[:3]
-            if recent: mem_hint = f"\n（上下文：{'; '.join(recent)}）"
+            # 1. 项目事实 → system prompt 顶部
+            facts = mem.get("事实", [])
+            if facts:
+                sys_extra = "## 项目事实\n" + "\n".join(f"- {f}" for f in facts) + "\n\n"
+            # 2. 术语说明（指代）→ user 前缀，不篡改原文
+            refs = mem.get("指代", {})
+            if refs:
+                user_prefix += "## 术语说明\n" + "\n".join(f"- {k} = {v}" for k, v in refs.items()) + "\n\n"
+            # 3. 相关记录筛选（关键词重叠 + 最近 2 条）
+            records = mem.get("记录", [])
+            if records:
+                kw = set(original)  # 当前输入的关键字集合
+                scored = []
+                for r in records:
+                    ow = r.get("原话", "")
+                    overlap = len(kw & set(ow))
+                    scored.append((overlap, r))
+                # 按重叠字数降序，取前 3
+                scored.sort(key=lambda x: x[0], reverse=True)
+                top = [r for _, r in scored[:3] if _ > 0 or scored.index((_, r)) < 2]
+                if top:
+                    user_prefix += "## 历史记录（仅参考，勿写入当前指令）\n"
+                    for r in top:
+                        t = r.get("时间", "")[:16]
+                        bt = r.get("回译", "") or r.get("原话", "")[:40]
+                        user_prefix += f"- [{t}] {bt}\n"
+                    user_prefix += "\n"
         try:
+            sys_content = sys_extra + INTENT_SYS if sys_extra else INTENT_SYS
             instruction, tokens = call_deepseek([
-                {"role": "system", "content": INTENT_SYS},
-                {"role": "user", "content": f"用户的话：{combined}{mem_hint}"}])
+                {"role": "system", "content": sys_content},
+                {"role": "user", "content": f"{user_prefix}用户的话：{combined}"}])
             body, uncertain, options = parse_uncertain(instruction)
             body = to_simplified(body)
             if uncertain: uncertain = to_simplified(uncertain)
@@ -186,12 +231,23 @@ class Api:
         ok, msg = _activate(code)
         return {"ok": ok, "msg": msg}
     
-    def save_action(self, project_name, original, instruction):
+    def save_action(self, project_name, original, instruction, back_translation=""):
+        """点「复制指令」时保存结构化记录"""
         try:
             mem = load_memory(project_name) if project_name != self.current_project else self.current_memory
-            mem.setdefault("最近使用", []).insert(0, original[:40] + "…" if len(original) > 40 else original)
-            mem["最近使用"] = mem["最近使用"][:20]
-            save_memory(project_name, mem); return True
+            import time as _t
+            record = {
+                "原话": original,
+                "指令": instruction,
+                "回译": back_translation.replace("【回译：】","").replace("【回译:】",""),
+                "时间": _t.strftime("%Y-%m-%dT%H:%M:%S")
+            }
+            mem.setdefault("记录", []).insert(0, record)
+            if len(mem["记录"]) > 50:
+                mem["记录"] = mem["记录"][:50]
+            save_memory(project_name, mem)
+            self.current_memory = mem
+            return True
         except Exception: return False
 
     def apply_option(self, original, supplement, option, project_name, mode):
@@ -199,11 +255,15 @@ class Api:
         return self.translate(original, supplement.strip() + "\n（我选：" + option + "）", project_name, mode)
 
     def save_to_memory(self, text, project_name):
-        """保存原话到记忆本。只在用户有交互价值时调用。"""
+        """补充/选项时保存原话（不存指令和回译，因为此时还没确认）"""
         try:
             mem = load_memory(project_name)
-            mem.setdefault("最近使用", []).insert(0, text[:60])
-            mem["最近使用"] = mem["最近使用"][:20]
+            import time as _t
+            mem.setdefault("记录", []).insert(0, {
+                "原话": text[:200], "指令": "", "回译": "", "时间": _t.strftime("%Y-%m-%dT%H:%M:%S")
+            })
+            if len(mem["记录"]) > 50:
+                mem["记录"] = mem["记录"][:50]
             save_memory(project_name, mem)
         except Exception: pass
 
@@ -462,7 +522,7 @@ button{padding:6px 16px;border:none;border-radius:6px;font-size:12px;font-weight
   <div id="backBox" style="display:none;background:#252526;border-radius:6px;padding:8px 10px;margin-top:6px;font-size:12px;color:#a0a0a0;line-height:1.5;white-space:pre-wrap"></div>
 </div>
 <script>
-var lastBody="",lastOriginal="",lastSupplement="";
+var lastBody="",lastOriginal="",lastSupplement="",lastBack="";
 async function loadProjects(){
   var sel=document.getElementById("projectSelect");sel.innerHTML="";
   try{
@@ -563,7 +623,7 @@ async function doTranslate(){
       var backBox=document.getElementById("backBox");
       if(back){backBox.style.display="block";backBox.innerHTML='<span style="color:#86868b;font-size:10px">回译对照（通俗版，对比看意思对不对）：</span><br>'+back}
       else backBox.style.display="none";
-      lastBody=instruction;
+      lastBody=instruction;lastBack=back.replace(/^【回译[：:]】\s*/, '');
       showUncertain(r.uncertain,r.options);
       document.getElementById("btnCopy").disabled=false;st.textContent="完成 · "+r.tokens+" token";
     }else{st.textContent="失败";var err=r.error||"未知错误";
@@ -581,7 +641,7 @@ document.getElementById("btnCopy").onclick=async function(){
   try{
     var ok=await window.pywebview.api.copy_to_clipboard(lastBody);
     st.textContent=ok?"已复制，去粘贴":"复制失败，请再点一次";
-    if(ok)window.pywebview.api.save_to_memory(lastOriginal,document.getElementById("projectSelect").value||"默认项目");
+    if(ok)window.pywebview.api.save_action(document.getElementById("projectSelect").value||"默认项目",lastOriginal,lastBody,lastBack);
   }catch(e){st.textContent="复制失败："+e}
 };
 document.getElementById("supplementBox").addEventListener("input",function(){lastSupplement=""});
@@ -619,13 +679,14 @@ HTML = HTML.replace("</script>", ACTIVATE_JS + "\n</script>")
 def main():
     if not _acquire_single_instance():
         return
-    # macOS：让App在Dock中显示图标，支持右键退出
+    # macOS：App在Dock显示，Cmd+H = 隐藏，红X = 退出
     try:
         from AppKit import NSApplication, NSApplicationActivationPolicyRegular
         NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyRegular)
     except Exception: pass
-    webview.create_window("说AI懂的话", html=HTML, width=420, height=680,
+    window = webview.create_window("说AI懂的话", html=HTML, width=420, height=680,
                           min_size=(360,500), js_api=api, background_color="#1e1e1e")
+    window.events.closing += lambda: os._exit(0)
     webview.start()
 
 if __name__ == "__main__": main()

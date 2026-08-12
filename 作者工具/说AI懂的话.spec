@@ -60,4 +60,8 @@ app = BUNDLE(
     name='说AI懂的话.app',
     icon=None,
     bundle_identifier='com.sayai.promptbridge',
+    info_plist={
+        'NSMicrophoneUsageDescription': '使用麦克风进行语音转文字',
+        'LSUIElement': True,
+    },
 )
