@@ -22,7 +22,7 @@ jobs:
             --hidden-import sounddevice --hidden-import faster_whisper --hidden-import numpy --hidden-import ctranslate2 \
             --add-data "license.py:." --add-data "reporter.py:." --add-data "whisper-base:whisper-base" \
             --collect-all webview --collect-all opencc --collect-all sounddevice --collect-all faster_whisper \
-            --exclude-module pytest --exclude-module _pytest --exclude-module onnxruntime \
+            --exclude-module pytest --exclude-module _pytest \
             PromptBridge.py
       - name: Add microphone permission and re-sign
         run: |
@@ -49,7 +49,7 @@ jobs:
             --hidden-import sounddevice --hidden-import faster_whisper --hidden-import numpy --hidden-import ctranslate2 \
             --add-data "license.py:." --add-data "reporter.py:." --add-data "whisper-base:whisper-base" \
             --collect-all webview --collect-all opencc --collect-all sounddevice --collect-all faster_whisper \
-            --exclude-module pytest --exclude-module _pytest --exclude-module onnxruntime \
+            --exclude-module pytest --exclude-module _pytest \
             PromptBridge.py
       - name: Add microphone permission and re-sign
         run: |
@@ -75,7 +75,7 @@ jobs:
             --hidden-import sounddevice --hidden-import faster_whisper --hidden-import numpy --hidden-import ctranslate2 `
             --add-data "license.py;." --add-data "reporter.py;." --add-data "whisper-base;whisper-base" `
             --collect-all webview --collect-all opencc --collect-all sounddevice --collect-all faster_whisper `
-            --exclude-module pytest --exclude-module _pytest --exclude-module onnxruntime `
+            --exclude-module pytest --exclude-module _pytest `
             PromptBridge.py
       - uses: actions/upload-artifact@v4
         with:
