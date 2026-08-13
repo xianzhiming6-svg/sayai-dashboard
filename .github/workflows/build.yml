@@ -33,6 +33,33 @@ jobs:
           name: 说AI懂的话-Mac
           path: dist/说AI懂的话.app
 
+  build-mac-x64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pywebview pyinstaller faster-whisper sounddevice huggingface_hub opencc
+      - name: Download speech model
+        run: python -c "from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-base', local_dir='whisper-base')"
+      - run: |
+          pyinstaller --onedir --windowed --name "说AI懂的话" \
+            --osx-bundle-identifier "com.sayai.promptbridge" \
+            --hidden-import sounddevice --hidden-import faster_whisper --hidden-import numpy --hidden-import ctranslate2 \
+            --add-data "license.py:." --add-data "reporter.py:." --add-data "whisper-base:whisper-base" \
+            --collect-all webview --collect-all opencc --collect-all sounddevice --collect-all faster_whisper \
+            --exclude-module pytest --exclude-module _pytest \
+            PromptBridge.py
+      - name: Add microphone permission and re-sign
+        run: |
+          plutil -insert NSMicrophoneUsageDescription -string "使用麦克风进行语音转文字" "dist/说AI懂的话.app/Contents/Info.plist"
+          codesign --force --deep -s - "dist/说AI懂的话.app"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 说AI懂的话-Mac-x64
+          path: dist/说AI懂的话.app
+
   build-win:
     runs-on: windows-latest
     steps:
