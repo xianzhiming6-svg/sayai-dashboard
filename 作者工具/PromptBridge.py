@@ -354,6 +354,14 @@ class Api:
                 GMEM_MOVEABLE = 0x0002
                 user32 = ctypes.windll.user32
                 kernel32 = ctypes.windll.kernel32
+                # 修复：必须设置参数/返回类型，否则 64 位句柄会被截断成 32 位导致复制失败
+                kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+                kernel32.GlobalAlloc.restype = ctypes.c_void_p
+                kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+                kernel32.GlobalLock.restype = ctypes.c_void_p
+                kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+                user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+                user32.SetClipboardData.restype = ctypes.c_void_p
                 if not user32.OpenClipboard(0):
                     return False
                 try:
