@@ -276,7 +276,11 @@ class Api:
             d = json.loads(urllib.request.urlopen(req, timeout=8).read())
             v = d.get("version", "")
             is_mac = platform.system() == "Darwin"
-            url = d.get("mac_url") if is_mac else d.get("win_url")
+            is_arm64 = platform.machine() == "arm64"
+            if is_mac:
+                url = d.get("mac_x64_url") if not is_arm64 else d.get("mac_url")
+            else:
+                url = d.get("win_url")
             if v: return {"ok": True, "latest": v, "url": url or ""}
         except Exception: pass
         try:
@@ -288,11 +292,13 @@ class Api:
             v = (r.get("tag_name") or "").lstrip("v")
             if not v: return {"ok": False, "latest": "", "url": ""}
             is_mac = platform.system() == "Darwin"
+            is_arm64 = platform.machine() == "arm64"
             url = ""
             for a in r.get("assets", []):
                 n = a.get("name", "").lower()
-                if is_mac and "mac" in n: url = a["browser_download_url"]; break
-                if not is_mac and "win" in n: url = a["browser_download_url"]; break
+                if is_mac and is_arm64 and "mac" in n and "arm64" in n: url = a["browser_download_url"]; break
+                if is_mac and not is_arm64 and "mac" in n and "x64" in n: url = a["browser_download_url"]; break
+                if not is_mac and "win" in n and n.endswith(".zip"): url = a["browser_download_url"]; break
             return {"ok": True, "latest": v, "url": url}
         except Exception: return {"ok": False, "latest": "", "url": ""}
 
