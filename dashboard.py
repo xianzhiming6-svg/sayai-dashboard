@@ -103,6 +103,7 @@ class Handler(BaseHTTPRequestHandler):
             # 从 GitHub Release 获取最新版本信息，失败时使用硬编码版本
             version = "1.2.0"
             mac_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-mac-arm64.zip"
+            mac_x64_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-mac-x64.zip"
             win_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-win-v2.zip"
             try:
                 req = urllib.request.Request(
@@ -117,6 +118,7 @@ class Handler(BaseHTTPRequestHandler):
                         name = a.get("name", "")
                         low = name.lower()
                         if "mac" in low and "arm64" in low: mac_url = a["browser_download_url"]
+                        if "mac" in low and "x64" in low: mac_x64_url = a["browser_download_url"]
                         if "win" in low and low.endswith(".zip"): win_url = a["browser_download_url"]
             except Exception:
                 pass
@@ -125,7 +127,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps({
-                "version": version, "mac_url": mac_url, "win_url": win_url
+                "version": version, "mac_url": mac_url, "mac_x64_url": mac_x64_url, "win_url": win_url
             }).encode())
         elif self.path.startswith("/check_activation"):
             iid = self.path.split("?id=")[-1] if "?id=" in self.path else ""
