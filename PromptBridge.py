@@ -9,6 +9,7 @@ from license import check_and_count as _check_license, get_install_id as _instal
 from reporter import report_usage as _report
 
 MODEL = "deepseek-v4-flash"
+APP_VERSION = "1.2.2"
 # 安全代理：翻译请求发到 Render 服务器，API Key 只在服务端
 API_URL = "https://sayai-dashboard.onrender.com/translate"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -268,21 +269,7 @@ class Api:
         except Exception: pass
 
     def check_update(self):
-        """检查最新版本。先查 Render 服务器，失败查 GitHub Release。"""
-        try:
-            import urllib.request, json
-            req = urllib.request.Request("https://sayai-dashboard.onrender.com/version",
-                headers={"User-Agent": "sayai"})
-            d = json.loads(urllib.request.urlopen(req, timeout=8).read())
-            v = d.get("version", "")
-            is_mac = platform.system() == "Darwin"
-            is_arm64 = platform.machine() == "arm64"
-            if is_mac:
-                url = d.get("mac_x64_url") if not is_arm64 else d.get("mac_url")
-            else:
-                url = d.get("win_url")
-            if v: return {"ok": True, "latest": v, "url": url or ""}
-        except Exception: pass
+        """仅以 GitHub Release 为准，避免服务端旧缓存下发失效下载地址。"""
         try:
             import urllib.request, json
             req = urllib.request.Request(
@@ -299,13 +286,15 @@ class Api:
                 if is_mac and is_arm64 and "mac" in n and "arm64" in n: url = a["browser_download_url"]; break
                 if is_mac and not is_arm64 and "mac" in n and "x64" in n: url = a["browser_download_url"]; break
                 if not is_mac and "win" in n and n.endswith(".zip"): url = a["browser_download_url"]; break
-            return {"ok": True, "latest": v, "url": url}
+            return {"ok": bool(url), "latest": v, "url": url}
         except Exception: return {"ok": False, "latest": "", "url": ""}
 
     def do_update(self, url):
         """下载+替换+重启，全自动。"""
         try:
             import tempfile, zipfile, shutil, subprocess
+            if not isinstance(url, str) or not url.startswith("https://github.com/"):
+                return {"ok": False, "error": "更新地址无效"}
             tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
             urllib.request.urlretrieve(url, tmp.name)
             td = tempfile.mkdtemp()
@@ -315,17 +304,22 @@ class Api:
             target = None
             for root, dirs, files in os.walk(td):
                 for d in dirs:
-                    if (is_mac and d.endswith(".app")) or (not is_mac and d.endswith(".exe")):
+                    if is_mac and d.endswith(".app"):
                         target = os.path.join(root, d); break
+                if not is_mac:
+                    for f in files:
+                        if f.lower().endswith(".exe"):
+                            target = root; break
                 if target: break
             if not target: return {"ok": False, "error": "安装包格式不对"}
             import sys
             if getattr(sys, 'frozen', False):
-                cur = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(sys.executable))))
+                cur = (os.path.dirname(os.path.dirname(os.path.dirname(sys.executable)))
+                       if is_mac else os.path.dirname(sys.executable))
             else: cur = os.path.abspath(".")
             if is_mac:
                 s = tempfile.NamedTemporaryFile(suffix=".sh", mode="w", delete=False)
-                s.write(f'#!/bin/bash\nsleep 2\nrm -rf "{cur}"\nmv "{target}" "{cur}"\nopen "{cur}"\nrm "$0"\n')
+                s.write(f'#!/bin/bash\nsleep 2\nxattr -dr com.apple.quarantine "{target}" 2>/dev/null || true\nrm -rf "{cur}"\nmv "{target}" "{cur}"\nopen "{cur}"\nrm "$0"\n')
                 s.close(); os.chmod(s.name, 0o755)
                 subprocess.Popen(["/usr/bin/open", "-a", "Terminal", s.name])
             else:
@@ -524,7 +518,7 @@ button{padding:6px 16px;border:none;border-radius:6px;font-size:12px;font-weight
   </div>
   <label for="supplementBox">补充（翻译不够时加话，可留空）：</label>
   <textarea id="supplementBox" placeholder="比如：还要能离线用"></textarea>
-  <div id="activateBox"><p>免费额度已用完</p><p style="font-size:10px;color:#888" id="activateId"></p><p style="color:#c4a0ff;font-size:11px;margin:8px 0">添加微信 <b>ZMyyPY0710</b> 获取激活码</p><input id="activateCode" placeholder="输入激活码"><button onclick="doActivate()">激活</button><div class="msg" id="activateMsg"></div></div>
+  <div id="activateBox"><p>免费额度已用完</p><p style="font-size:10px;color:#888" id="activateId"></p><p style="color:#c4a0ff;font-size:11px;margin:8px 0">联系作者获取激活码：微信 <b>ZMyyPY0710</b><br>电话 13724682889 · 邮箱 280337866@qq.com</p><input id="activateCode" placeholder="输入激活码"><button onclick="doActivate()">激活</button><div class="msg" id="activateMsg"></div></div>
   <div class="btn-row">
     <button id="btnTranslate">翻译 →</button>
     <button id="btnCopy" disabled>复制指令</button>
@@ -537,6 +531,11 @@ button{padding:6px 16px;border:none;border-radius:6px;font-size:12px;font-weight
 </div>
 <script>
 var lastBody="",lastOriginal="",lastSupplement="",lastBack="";
+function isNewerVersion(latest){
+  var a=String(latest).split('.').map(Number),b="__APP_VERSION__".split('.').map(Number);
+  for(var i=0;i<Math.max(a.length,b.length);i++){var x=a[i]||0,y=b[i]||0;if(x!==y)return x>y}
+  return false
+}
 async function loadProjects(){
   var sel=document.getElementById("projectSelect");sel.innerHTML="";
   try{
@@ -558,7 +557,7 @@ waitBridge(function(){
   loadProjects();
   setTimeout(function(){
     window.pywebview.api.check_update().then(function(r){
-      if(r.ok&&r.latest&&r.url){
+      if(r.ok&&r.latest&&r.url&&isNewerVersion(r.latest)){
         document.getElementById("updateVer").textContent=r.latest;
         document.getElementById("updateLink").setAttribute("data-url",r.url);
         document.getElementById("updateBar").style.display="block";
@@ -573,7 +572,7 @@ waitBridge(function(){
 function checkForUpdate(quiet){
   if(quiet)document.getElementById("btnUpdate").textContent="检查中…";
   window.pywebview.api.check_update().then(function(r){
-    if(r.ok&&r.latest){document.getElementById("updateVer").textContent=r.latest;document.getElementById("updateBar").style.display="block";document.getElementById("btnUpdate").textContent="新版本"}
+    if(r.ok&&r.latest&&r.url&&isNewerVersion(r.latest)){document.getElementById("updateVer").textContent=r.latest;document.getElementById("updateLink").setAttribute("data-url",r.url);document.getElementById("updateBar").style.display="block";document.getElementById("btnUpdate").textContent="新版本"}
     else{if(quiet)alert("已是最新版本");document.getElementById("btnUpdate").textContent="更新"}
   }).catch(function(){if(quiet)alert("网络不通");document.getElementById("btnUpdate").textContent="更新"})
 }
@@ -688,6 +687,7 @@ async function doActivate(){
 }
 """
 # 注入 JS 到 HTML
+HTML = HTML.replace("__APP_VERSION__", APP_VERSION)
 HTML = HTML.replace("</script>", ACTIVATE_JS + "\n</script>")
 
 def main():

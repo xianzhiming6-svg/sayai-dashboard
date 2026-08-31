@@ -101,10 +101,11 @@ class Handler(BaseHTTPRequestHandler):
                 "total_cost":round(total_cost,4), "total_users":total_users, "today":today}, ensure_ascii=False).encode())
         elif self.path == "/version":
             # 从 GitHub Release 获取最新版本信息，失败时使用硬编码版本
-            version = "1.2.0"
-            mac_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-mac-arm64.zip"
-            mac_x64_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-mac-x64.zip"
-            win_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/latest/download/sayai-win-v2.zip"
+            # 兜底必须只指向已经发布的版本；正常情况下会被 GitHub API 的最新 Release 覆盖。
+            version = "1.2.1"
+            mac_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/download/v1.2.1/sayai-mac-arm64.zip"
+            mac_x64_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/download/v1.2.1/sayai-mac-x64.zip"
+            win_url = "https://github.com/xianzhiming6-svg/sayai-dashboard/releases/download/v1.2.1/sayai-win-v2.zip"
             try:
                 req = urllib.request.Request(
                     "https://api.github.com/repos/xianzhiming6-svg/sayai-dashboard/releases/latest",

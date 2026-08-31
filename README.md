@@ -3,7 +3,7 @@
 > AI 听不懂你的白话？3 秒帮你翻译成 AI 秒懂的专业指令。
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.2.0-blue" alt="version">
+  <img src="https://img.shields.io/badge/version-1.2.2-blue" alt="version">
   <img src="https://img.shields.io/badge/platform-Mac%20%7C%20Windows-lightgrey" alt="platform">
   <img src="https://img.shields.io/badge/翻译API-DeepSeek%20V4-green" alt="api">
 </p>
@@ -62,7 +62,7 @@
    - **Intel 芯片** → 下载 `sayai-mac-x64.zip`
 2. 双击解压 → 把 `说AI懂的话.app` 拖到「应用程序」文件夹
 3. 第一次打开：**右键点击** App 图标 → 选择「打开」→ 弹出提示后点「打开」
-4. 如果仍提示“已损坏，无法打开”：打开「终端」，输入下面命令后回车，再打开 App：
+4. 如果仍提示“无法打开”或“已损坏”：先右键 App 选择「打开」。如果仍被系统拦截，打开「终端」，输入下面命令后回车，再打开 App：
    `xattr -dr com.apple.quarantine "/Applications/说AI懂的话.app"`
 5. 语音权限提示 → 点「允许」
 
@@ -126,5 +126,6 @@ A: 翻译结果适用于所有主流 AI——ChatGPT、DeepSeek、Kimi、Claude�
 ## 📮 联系作者
 
 - 微信：ZMyyPY0710
-- 邮箱：xianzhiming6@gmail.com
+- 电话：13724682889
+- 邮箱：280337866@qq.com
 - GitHub：[@xianzhiming6-svg](https://github.com/xianzhiming6-svg)

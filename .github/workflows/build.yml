@@ -3,6 +3,7 @@ name: Build App
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 jobs:
@@ -27,11 +28,17 @@ jobs:
       - name: Add microphone permission and re-sign
         run: |
           plutil -insert NSMicrophoneUsageDescription -string "使用麦克风进行语音转文字" "dist/说AI懂的话.app/Contents/Info.plist"
+          plutil -replace CFBundleShortVersionString -string "1.2.2" "dist/说AI懂的话.app/Contents/Info.plist"
+          plutil -replace CFBundleVersion -string "1.2.2" "dist/说AI懂的话.app/Contents/Info.plist"
           codesign --force --deep -s - "dist/说AI懂的话.app"
+      - name: Verify and package distributable ZIP
+        run: |
+          codesign --verify --deep --strict "dist/说AI懂的话.app"
+          ditto -c -k --sequesterRsrc --keepParent "dist/说AI懂的话.app" "sayai-mac-arm64.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: 说AI懂的话-Mac
-          path: dist/说AI懂的话.app
+          path: sayai-mac-arm64.zip
 
   build-mac-x64:
     runs-on: macos-13
@@ -54,11 +61,17 @@ jobs:
       - name: Add microphone permission and re-sign
         run: |
           plutil -insert NSMicrophoneUsageDescription -string "使用麦克风进行语音转文字" "dist/说AI懂的话.app/Contents/Info.plist"
+          plutil -replace CFBundleShortVersionString -string "1.2.2" "dist/说AI懂的话.app/Contents/Info.plist"
+          plutil -replace CFBundleVersion -string "1.2.2" "dist/说AI懂的话.app/Contents/Info.plist"
           codesign --force --deep -s - "dist/说AI懂的话.app"
+      - name: Verify and package distributable ZIP
+        run: |
+          codesign --verify --deep --strict "dist/说AI懂的话.app"
+          ditto -c -k --sequesterRsrc --keepParent "dist/说AI懂的话.app" "sayai-mac-x64.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: 说AI懂的话-Mac-x64
-          path: dist/说AI懂的话.app
+          path: sayai-mac-x64.zip
 
   build-win:
     runs-on: windows-latest
@@ -81,3 +94,25 @@ jobs:
         with:
           name: 说AI懂的话-Windows
           path: dist/说AI懂的话
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-mac, build-mac-x64, build-win]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Package Windows distributable ZIP
+        run: cd release-assets && zip -qr ../sayai-win-v2.zip "说AI懂的话"
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-assets/sayai-mac-arm64.zip
+            release-assets/sayai-mac-x64.zip
+            sayai-win-v2.zip
+          generate_release_notes: true
