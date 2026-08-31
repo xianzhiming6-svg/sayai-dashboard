@@ -9,7 +9,7 @@ from license import check_and_count as _check_license, get_install_id as _instal
 from reporter import report_usage as _report
 
 MODEL = "deepseek-v4-flash"
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 # 安全代理：翻译请求发到 Render 服务器，API Key 只在服务端
 API_URL = "https://sayai-dashboard.onrender.com/translate"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
