@@ -3,7 +3,7 @@
 > AI 听不懂你的白话？3 秒帮你翻译成 AI 秒懂的专业指令。
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.2.3-blue" alt="version">
+  <img src="https://img.shields.io/badge/version-1.2.4-blue" alt="version">
   <img src="https://img.shields.io/badge/platform-Mac%20%7C%20Windows-lightgrey" alt="platform">
   <img src="https://img.shields.io/badge/翻译API-DeepSeek%20V4-green" alt="api">
 </p>
