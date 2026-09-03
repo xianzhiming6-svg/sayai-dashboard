@@ -6,7 +6,16 @@
 - 次数用完后需付费激活
 - 作者可远程更换 API Key 让旧版失效
 """
-import os, json, hashlib, time
+import os, json, hashlib, time, ssl, urllib.request
+
+try:
+    import certifi
+except ImportError:
+    certifi = None
+
+def _https_urlopen(request, timeout):
+    context = ssl.create_default_context(cafile=certifi.where()) if certifi else ssl.create_default_context()
+    return urllib.request.urlopen(request, timeout=timeout, context=context)
 
 USAGE_FILE = os.path.join(os.path.expanduser("~/.sayai_usage.json"))
 
@@ -49,14 +58,14 @@ def check_and_count():
 
 def activate(code):
     """激活：调用服务器验证"""
-    import urllib.request as _r, json as _j
+    import json as _j
     u = load_usage()
     iid = u.get("install_id", get_install_id())
     try:
         d = _j.dumps({"install_id": iid, "code": code}).encode()
         req = _r.Request("https://sayai-dashboard.onrender.com/activate",
             data=d, headers={"Content-Type":"application/json"})
-        resp = _j.loads(_r.urlopen(req, timeout=10).read())
+        resp = _j.loads(_https_urlopen(req, timeout=10).read())
         if resp.get("ok"):
             u["activated"] = True
             u["expires"] = resp.get("expires", "")

@@ -4,12 +4,12 @@
 PromptBridge 桌面面板 v1.1
 - 翻译、弹选项、补充、单一/多模式、🎤录音转文字
 """
-import webview, json, urllib.request, os, re, subprocess, platform, threading, socket, shutil
+import webview, json, urllib.request, os, re, subprocess, platform, threading, socket, shutil, ssl
 from license import check_and_count as _check_license, get_install_id as _install_id, activate as _activate
 from reporter import report_usage as _report
 
 MODEL = "deepseek-v4-flash"
-APP_VERSION = "1.2.4"
+APP_VERSION = "1.2.5"
 # 安全代理：翻译请求发到 Render 服务器，API Key 只在服务端
 API_URL = "https://sayai-dashboard.onrender.com/translate"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +27,15 @@ except Exception:
     pass
 IS_MAC = platform.system() == "Darwin"
 IS_WIN = platform.system() == "Windows"
+
+try:
+    import certifi
+except ImportError:
+    certifi = None
+
+def _https_urlopen(request, timeout):
+    context = ssl.create_default_context(cafile=certifi.where()) if certifi else ssl.create_default_context()
+    return urllib.request.urlopen(request, timeout=timeout, context=context)
 
 try:
     from opencc import OpenCC as _OpenCC
@@ -75,7 +84,7 @@ def call_deepseek(messages, max_tokens=900):
     payload = {"model": MODEL, "messages": messages}
     req = urllib.request.Request(API_URL, data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"})
-    r = json.loads(urllib.request.urlopen(req, timeout=60).read())
+    r = json.loads(_https_urlopen(req, timeout=60).read())
     if "error" in r:
         raise RuntimeError(r["error"])
     return r["content"], r["tokens"]
@@ -275,7 +284,7 @@ class Api:
             req = urllib.request.Request(
                 "https://api.github.com/repos/xianzhiming6-svg/sayai-dashboard/releases/latest",
                 headers={"User-Agent": "sayai"})
-            r = json.loads(urllib.request.urlopen(req, timeout=8).read())
+            r = json.loads(_https_urlopen(req, timeout=8).read())
             v = (r.get("tag_name") or "").lstrip("v")
             if not v: return {"ok": False, "latest": "", "url": ""}
             is_mac = platform.system() == "Darwin"
@@ -296,7 +305,8 @@ class Api:
             if not isinstance(url, str) or not url.startswith("https://github.com/"):
                 return {"ok": False, "error": "更新地址无效"}
             tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
-            urllib.request.urlretrieve(url, tmp.name)
+            with _https_urlopen(url, timeout=120) as response, open(tmp.name, "wb") as output:
+                shutil.copyfileobj(response, output)
             td = tempfile.mkdtemp()
             with zipfile.ZipFile(tmp.name, 'r') as z: z.extractall(td)
             os.unlink(tmp.name)

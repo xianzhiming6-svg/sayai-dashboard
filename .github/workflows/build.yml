@@ -14,22 +14,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install pywebview pyinstaller faster-whisper sounddevice huggingface_hub opencc
+      - run: pip install pywebview pyinstaller faster-whisper sounddevice huggingface_hub opencc certifi
       - name: Download speech model
         run: python -c "from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-base', local_dir='whisper-base')"
       - run: |
           pyinstaller --onedir --windowed --name "说AI懂的话" \
             --osx-bundle-identifier "com.sayai.promptbridge" \
-            --hidden-import sounddevice --hidden-import faster_whisper --hidden-import numpy --hidden-import ctranslate2 \
+            --hidden-import sounddevice --hidden-import faster_whisper --hidden-import numpy --hidden-import ctranslate2 --hidden-import certifi \
             --add-data "license.py:." --add-data "reporter.py:." --add-data "whisper-base:whisper-base" \
-            --collect-all webview --collect-all opencc --collect-all sounddevice --collect-all faster_whisper \
+            --collect-all webview --collect-all opencc --collect-all sounddevice --collect-all faster_whisper --collect-data certifi \
             --exclude-module pytest --exclude-module _pytest \
             PromptBridge.py
       - name: Add microphone permission and re-sign
         run: |
           plutil -insert NSMicrophoneUsageDescription -string "使用麦克风进行语音转文字" "dist/说AI懂的话.app/Contents/Info.plist"
-          plutil -replace CFBundleShortVersionString -string "1.2.4" "dist/说AI懂的话.app/Contents/Info.plist"
-          plutil -replace CFBundleVersion -string "1.2.4" "dist/说AI懂的话.app/Contents/Info.plist"
+          plutil -replace CFBundleShortVersionString -string "1.2.5" "dist/说AI懂的话.app/Contents/Info.plist"
+          plutil -replace CFBundleVersion -string "1.2.5" "dist/说AI懂的话.app/Contents/Info.plist"
           codesign --force --deep -s - "dist/说AI懂的话.app"
       - name: Verify and package distributable ZIP
         run: |
@@ -47,22 +47,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install pywebview pyinstaller faster-whisper sounddevice huggingface_hub opencc
+      - run: pip install pywebview pyinstaller faster-whisper sounddevice huggingface_hub opencc certifi
       - name: Download speech model
         run: python -c "from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-base', local_dir='whisper-base')"
       - run: |
           pyinstaller --onedir --windowed --name "说AI懂的话" \
             --osx-bundle-identifier "com.sayai.promptbridge" \
-            --hidden-import sounddevice --hidden-import faster_whisper --hidden-import numpy --hidden-import ctranslate2 \
+            --hidden-import sounddevice --hidden-import faster_whisper --hidden-import numpy --hidden-import ctranslate2 --hidden-import certifi \
             --add-data "license.py:." --add-data "reporter.py:." --add-data "whisper-base:whisper-base" \
-            --collect-all webview --collect-all opencc --collect-all sounddevice --collect-all faster_whisper \
+            --collect-all webview --collect-all opencc --collect-all sounddevice --collect-all faster_whisper --collect-data certifi \
             --exclude-module pytest --exclude-module _pytest \
             PromptBridge.py
       - name: Add microphone permission and re-sign
         run: |
           plutil -insert NSMicrophoneUsageDescription -string "使用麦克风进行语音转文字" "dist/说AI懂的话.app/Contents/Info.plist"
-          plutil -replace CFBundleShortVersionString -string "1.2.4" "dist/说AI懂的话.app/Contents/Info.plist"
-          plutil -replace CFBundleVersion -string "1.2.4" "dist/说AI懂的话.app/Contents/Info.plist"
+          plutil -replace CFBundleShortVersionString -string "1.2.5" "dist/说AI懂的话.app/Contents/Info.plist"
+          plutil -replace CFBundleVersion -string "1.2.5" "dist/说AI懂的话.app/Contents/Info.plist"
           codesign --force --deep -s - "dist/说AI懂的话.app"
       - name: Verify and package distributable ZIP
         run: |
@@ -80,14 +80,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install pywebview pyinstaller faster-whisper sounddevice huggingface_hub opencc
+      - run: pip install pywebview pyinstaller faster-whisper sounddevice huggingface_hub opencc certifi
       - name: Download speech model
         run: python -c "from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-base', local_dir='whisper-base')"
       - run: |
           pyinstaller --onedir --windowed --name "说AI懂的话" `
-            --hidden-import sounddevice --hidden-import faster_whisper --hidden-import numpy --hidden-import ctranslate2 `
+            --hidden-import sounddevice --hidden-import faster_whisper --hidden-import numpy --hidden-import ctranslate2 --hidden-import certifi `
             --add-data "license.py;." --add-data "reporter.py;." --add-data "whisper-base;whisper-base" `
-            --collect-all webview --collect-all opencc --collect-all sounddevice --collect-all faster_whisper `
+            --collect-all webview --collect-all opencc --collect-all sounddevice --collect-all faster_whisper --collect-data certifi `
             --exclude-module pytest --exclude-module _pytest `
             PromptBridge.py
       - name: Package Windows distributable ZIP

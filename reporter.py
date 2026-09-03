@@ -4,7 +4,16 @@
 说AI懂的话 - 用量上报模块
 每次翻译后后台静默上报到监控后端
 """
-import json, urllib.request, time, threading
+import json, urllib.request, time, threading, ssl
+
+try:
+    import certifi
+except ImportError:
+    certifi = None
+
+def _https_urlopen(request, timeout):
+    context = ssl.create_default_context(cafile=certifi.where()) if certifi else ssl.create_default_context()
+    return urllib.request.urlopen(request, timeout=timeout, context=context)
 
 # ---- 后端地址（部署后改为你的真实地址）----
 BACKEND_URL = "https://sayai-dashboard.onrender.com"  # 部署后替换
@@ -21,6 +30,6 @@ def report_usage(install_id, tokens):
         }).encode()
         req = urllib.request.Request(f"{BACKEND_URL}/report", data=data,
             headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=5)
+        _https_urlopen(req, timeout=5)
     except Exception:
         pass  # 上报失败不影响主功能
