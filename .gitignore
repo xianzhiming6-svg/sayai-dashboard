@@ -1,0 +1,8 @@
+.DS_Store
+__pycache__/
+.app-user-data/
+.electron-cache/
+.hermes/
+.npm-cache/
+仪表盘后端/
+作者工具/

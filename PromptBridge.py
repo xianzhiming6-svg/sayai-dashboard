@@ -37,6 +37,9 @@ def _https_urlopen(request, timeout):
     context = ssl.create_default_context(cafile=certifi.where()) if certifi else ssl.create_default_context()
     return urllib.request.urlopen(request, timeout=timeout, context=context)
 
+class ActivationRequired(RuntimeError):
+    pass
+
 try:
     from opencc import OpenCC as _OpenCC
     _cc = _OpenCC("t2s")
@@ -81,10 +84,12 @@ INTENT_SYS = """你是"白话精炼器"。用户用日常口语说出需求（�
 
 def call_deepseek(messages, max_tokens=900):
     """通过 Render 服务器安全代理调用 DeepSeek（Key 在服务端，客户端不可见）"""
-    payload = {"model": MODEL, "messages": messages}
+    payload = {"model": MODEL, "messages": messages, "install_id": _install_id()}
     req = urllib.request.Request(API_URL, data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"})
     r = json.loads(_https_urlopen(req, timeout=60).read())
+    if r.get("need_activate"):
+        raise ActivationRequired(r.get("error", "免费额度已用完，请联系作者获取激活码"))
     if "error" in r:
         raise RuntimeError(r["error"])
     return r["content"], r["tokens"]
@@ -232,6 +237,8 @@ class Api:
                     args=(_install_id, tokens), daemon=True).start()
             except Exception: pass
             return {"ok": True, "body": body, "uncertain": uncertain, "options": options, "tokens": tokens}
+        except ActivationRequired as e:
+            return {"ok": False, "error": str(e), "need_activate": True}
         except Exception as e: return {"ok": False, "error": str(e)}
 
     def get_install_id_api(self):

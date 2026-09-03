@@ -46,6 +46,10 @@ def check_and_count():
     # 作者机器豁免
     if u["install_id"] in _AUTHOR_IDS:
         return True, -1, ""
+    expires = u.get("expires", "")
+    if u.get("activated") and expires and expires < time.strftime("%Y-%m-%d"):
+        u["activated"] = False
+        save_usage(u)
     if u.get("activated"):
         u["count"] = u.get("count", 0) + 1
         save_usage(u)
@@ -63,7 +67,7 @@ def activate(code):
     iid = u.get("install_id", get_install_id())
     try:
         d = _j.dumps({"install_id": iid, "code": code}).encode()
-        req = _r.Request("https://sayai-dashboard.onrender.com/activate",
+        req = urllib.request.Request("https://sayai-dashboard.onrender.com/activate",
             data=d, headers={"Content-Type":"application/json"})
         resp = _j.loads(_https_urlopen(req, timeout=10).read())
         if resp.get("ok"):

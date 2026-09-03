@@ -4,13 +4,17 @@
 说AI懂的话 - 监控仪表盘后端
 一个文件：接收用量上报 + 返回Q版仪表盘HTML
 """
-import sqlite3, json, time, os, urllib.request, hashlib
+import sqlite3, json, time, os, urllib.request, hashlib, hmac
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
 DB = os.path.join(os.path.dirname(__file__), "usage.db")
 DS_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DS_URL = "https://api.deepseek.com/v1/chat/completions"
+FREE_LIMIT = 50
+IP_DAILY_LIMIT = 100
+LICENSE_SECRET = os.environ.get("LICENSE_SECRET", "")
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 def init_db():
     with sqlite3.connect(DB) as c:
@@ -20,6 +24,22 @@ def init_db():
             tokens INTEGER DEFAULT 0,
             cost_yuan REAL DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now','localtime'))
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS usage_limits (
+            install_id TEXT PRIMARY KEY,
+            count INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT DEFAULT (datetime('now','localtime'))
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS activations (
+            install_id TEXT PRIMARY KEY,
+            activated_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS ip_limits (
+            ip_hash TEXT NOT NULL,
+            day TEXT NOT NULL,
+            count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (ip_hash, day)
         )''')
 
 class Handler(BaseHTTPRequestHandler):
@@ -34,19 +54,43 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"ok")
         elif self.path == "/translate":
             length = int(self.headers.get("Content-Length", 0))
+            if length <= 0 or length > 128 * 1024:
+                self._json_response({"error": "请求大小无效"}, status=413)
+                return
             data = json.loads(self.rfile.read(length))
-            result = self._call_deepseek(data.get("messages", []), data.get("model", "deepseek-v4-flash"))
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
+            install_id = str(data.get("install_id", ""))
+            if not install_id:
+                self._json_response({"error": "缺少安装标识"}, status=400)
+                return
+            if not self._consume_ip_quota():
+                self._json_response({"error": "今日请求过多，请明天再试"}, status=429)
+                return
+            messages = data.get("messages", [])
+            if not isinstance(messages, list) or not messages or len(messages) > 20:
+                self._json_response({"error": "消息格式无效"}, status=400)
+                return
+            if sum(len(str(item.get("content", ""))) for item in messages if isinstance(item, dict)) > 50000:
+                self._json_response({"error": "消息内容过长"}, status=413)
+                return
+            allowed, remaining = self._consume_quota(install_id)
+            if not allowed:
+                self._json_response({"error": "免费额度已用完，请联系作者获取激活码",
+                    "need_activate": True, "remaining": remaining})
+                return
+            result = self._call_deepseek(messages, "deepseek-v4-flash")
+            self._json_response(result)
         elif self.path == "/activate":
-            LIC = os.environ.get("LICENSE_SECRET", "REDACTED")
+            if not self._consume_ip_quota():
+                self._json_response({"error": "请求过多，请稍后再试"}, status=429)
+                return
             cl = int(self.headers.get("Content-Length", 0))
             data = json.loads(self.rfile.read(cl)) if cl else {}
             iid = data.get("install_id", "")
             code = data.get("code", "")
-            expected = hashlib.sha256((iid + LIC).encode()).hexdigest()[:16]
+            if not LICENSE_SECRET:
+                self._json_response({"error": "服务端未配置许可密钥"}, status=503)
+                return
+            expected = hashlib.sha256((iid + LICENSE_SECRET).encode()).hexdigest()[:16]
             ok = (code == expected)
             expires = ""
             if ok:
@@ -55,10 +99,51 @@ class Handler(BaseHTTPRequestHandler):
                 with sqlite3.connect(DB) as c:
                     c.execute("CREATE TABLE IF NOT EXISTS activations (install_id TEXT PRIMARY KEY, activated_at TEXT, expires_at TEXT)")
                     c.execute("INSERT OR REPLACE INTO activations VALUES (?,?,?)", (iid, _t.strftime("%Y-%m-%d"), expires))
-            self.send_response(200); self.send_header("Content-Type","application/json"); self.send_header("Access-Control-Allow-Origin","*"); self.end_headers()
-            self.wfile.write(json.dumps({"ok":ok,"expires":expires}).encode())
+            self._json_response({"ok":ok,"expires":expires})
         else:
             self.send_response(404); self.end_headers()
+
+    def _json_response(self, payload, status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(payload, ensure_ascii=False).encode())
+
+    def _is_activated(self, install_id):
+        with sqlite3.connect(DB) as c:
+            row = c.execute("SELECT 1 FROM activations WHERE install_id=? AND expires_at>=date('now')",
+                (install_id,)).fetchone()
+        return row is not None
+
+    def _consume_quota(self, install_id):
+        if self._is_activated(install_id):
+            return True, -1
+        with sqlite3.connect(DB) as c:
+            c.execute("BEGIN IMMEDIATE")
+            row = c.execute("SELECT count FROM usage_limits WHERE install_id=?", (install_id,)).fetchone()
+            count = row[0] if row else 0
+            if count >= FREE_LIMIT:
+                return False, 0
+            count += 1
+            c.execute("INSERT INTO usage_limits (install_id,count,updated_at) VALUES (?,?,datetime('now','localtime')) "
+                "ON CONFLICT(install_id) DO UPDATE SET count=excluded.count, updated_at=excluded.updated_at",
+                (install_id, count))
+        return True, FREE_LIMIT - count
+
+    def _consume_ip_quota(self):
+        forwarded = self.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
+        address = forwarded or self.client_address[0]
+        ip_hash = hashlib.sha256(address.encode()).hexdigest()
+        with sqlite3.connect(DB) as c:
+            c.execute("BEGIN IMMEDIATE")
+            row = c.execute("SELECT count FROM ip_limits WHERE ip_hash=? AND day=date('now')",
+                (ip_hash,)).fetchone()
+            count = row[0] if row else 0
+            if count >= IP_DAILY_LIMIT:
+                return False
+            c.execute("INSERT INTO ip_limits (ip_hash,day,count) VALUES (?,date('now'),1) "
+                "ON CONFLICT(ip_hash,day) DO UPDATE SET count=count+1", (ip_hash,))
+        return True
 
     def _call_deepseek(self, messages, model):
         if not DS_KEY: return {"error": "未配置 DEEPSEEK_API_KEY"}
@@ -81,6 +166,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/stats":
+            supplied = self.headers.get("X-Admin-Token", "")
+            if not ADMIN_TOKEN or not hmac.compare_digest(supplied, ADMIN_TOKEN):
+                self._json_response({"error": "未授权"}, status=401)
+                return
             with sqlite3.connect(DB) as c:
                 c.row_factory = sqlite3.Row
                 users = c.execute('''SELECT install_id, SUM(tokens) as t, SUM(cost_yuan) as c,
@@ -219,7 +308,10 @@ const colors = ['#f48fb1','#a5d6a7','#90caf9','#ce93d8','#ffcc80','#80cbc4','#ef
 let dailyCtx, userCtx, dailyChart, userChart;
 async function load(){
   try{
-    const r = await fetch('/api/stats'); const d = await r.json();
+    let token = sessionStorage.getItem('sayai_admin_token') || '';
+    if(!token){ token = prompt('请输入管理员令牌'); if(token) sessionStorage.setItem('sayai_admin_token', token); }
+    const r = await fetch('/api/stats', {headers:{'X-Admin-Token':token}}); const d = await r.json();
+    if(!r.ok) throw new Error(d.error || '未授权');
     document.getElementById('users').textContent = d.total_users;
     document.getElementById('today').textContent = fmt(d.today);
     document.getElementById('total').textContent = fmt(d.total_tokens);
